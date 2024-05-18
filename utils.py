@@ -6,12 +6,12 @@ class ExportParameters(bpy.types.PropertyGroup):
     flip_loc: BoolVectorProperty(
         name="Location Flips",
         size=3,
-        default=[False, False, False]
+        default=[False, True, False]
     )
     flip_rot: BoolVectorProperty(
         name="Rotation Flips",
         size=3,
-        default=[False, False, False]
+        default=[False, False, True]
     )
     adjust_rot: BoolProperty(
         name="Adjust rot to -pi + rot",

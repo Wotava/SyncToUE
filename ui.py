@@ -14,6 +14,11 @@ class VIEW3D_PT_ModifierManager(bpy.types.Panel):
         layout = self.layout
 
         row = layout.row()
+        row.label(text=f"Handler loaded: {context.scene.get('stu_handler_loaded')}")
+        row = layout.row()
+        row.operator("scene.stu_toggle_handler", text="Toggle Handler")
+
+        row = layout.row()
         op = row.operator("scene.json_dump", text="Dump and Export")
         op.write_meshes = True
 

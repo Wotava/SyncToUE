@@ -1,4 +1,7 @@
 import bpy
+from bpy.app.handlers import persistent
+from bpy.props import BoolProperty
+
 import json
 import os
 from mathutils import Vector, Euler, Matrix
@@ -11,6 +14,8 @@ table_justify = 40
 
 instancing_nodes = ["MG_Scatter", "MG_Array"]
 morph_nodes = ["MG_StairGenerator"]
+
+last_mode = 'OBJECT'
 
 
 def snake_case(string: str) -> str:
@@ -73,10 +78,15 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
     export_list = []
     reporter = Report()
 
-    write_meshes: bpy.props.BoolProperty(
+    write_meshes: BoolProperty(
         name="Write Meshes",
         default=True
     )
+    write_all: BoolProperty(
+        name="Write All",
+        default=False
+    )
+
 
     @classmethod
     def poll(cls, context):
@@ -105,10 +115,20 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
         # build ref list
         export_ref = []
         for data in self.export_list:
+            if data.get('clean') is True and not self.write_all:
+                continue
+            else:
+                self.reporter.message(f"{data.name.ljust(table_justify)} was dirty",
+                                      category="Export-Filter")
             for obj in bpy.data.objects:
                 if obj.data is data:
                     export_ref.append(obj)
                     break
+            else:
+                self.reporter.message(f"{data.name.ljust(table_justify)} -> failed to find obj ref",
+                                      category="Export-Errors")
+                continue
+            data['clean'] = True
 
         for obj in export_ref:
             data = obj.data
@@ -247,6 +267,8 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
 
     def execute(self, context):
         self.reporter.init()
+        self.export_list.clear()
+
         json_target = bpy.data.texts.get("JSON_base")
         if not json_target:
             json_target = bpy.data.texts.new("JSON_base")
@@ -287,9 +309,6 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
                         else:
                             is_instanced = True
                             self.reporter.message(f"{obj.name}: found {mod.node_group.name}")
-
-                    elif mod.type in ['NODES', 'ARRAY']:
-                        needs_export = True
                     else:
                         self.reporter.message(f"{obj.name}: {mod.name} was ignored")
 
@@ -314,8 +333,40 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
         json_target.write(json.dumps(object_array, sort_keys=True, indent=4))
         json_target.write("}")
         self.reporter.message(f"INSTANCES COUNT: {global_count}", category="Final")
-        self.reporter.verdict()
 
         if self.write_meshes:
             self.export_fbx()
+
+        self.reporter.verdict()
+        return {'FINISHED'}
+
+
+last_state = {'OBJECT'}
+
+
+@persistent
+def edit_mode_handler(scene):
+    if last_state != {bpy.context.mode}:
+        last_state.pop()
+        last_state.add(bpy.context.mode)
+        for obj in bpy.context.selected_objects:
+            if obj.type == 'MESH':
+                obj.data['clean'] = False
+
+
+class SCENE_OP_StartHandler(bpy.types.Operator):
+    """Toggle Handler to catch edit mode changes"""
+    bl_label = "Toggle StU handler"
+    bl_idname = "scene.stu_toggle_handler"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+        if context.scene.get('stu_handler_loaded') is True or context.scene.get('stu_handler_loaded') is None:
+            for h in bpy.app.handlers.depsgraph_update_post:
+                if h.__name__ == 'edit_mode_handler':
+                    bpy.app.handlers.depsgraph_update_post.remove(h)
+            context.scene['stu_handler_loaded'] = False
+        else:
+            bpy.app.handlers.depsgraph_update_post.append(edit_mode_handler)
+            context.scene['stu_handler_loaded'] = True
         return {'FINISHED'}

@@ -21,7 +21,8 @@ bl_info = {
 classes = [
     operators.SCENE_OP_DumpToJSON,
     ui.VIEW3D_PT_ModifierManager,
-    utils.ExportParameters
+    utils.ExportParameters,
+    operators.SCENE_OP_StartHandler
 ]
 
 def register():
