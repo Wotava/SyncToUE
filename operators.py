@@ -1,5 +1,6 @@
 import bpy
 import json
+import os
 
 unit_multiplier = 100.0
 light_multiplier = 1.0
@@ -65,6 +66,7 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
     bl_options = {'REGISTER', 'UNDO'}
 
     export_list = []
+    export_ref = []
     reporter = Report()
 
     @classmethod
@@ -82,7 +84,40 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
         else:
             return obj.name
 
-    def add_to_export(self, obj, instanced=False) -> bool:
+    def export_fbx(self):
+        if self.export_list == 0:
+            return
+
+        dummy = bpy.data.objects.new("Dummy", self.export_list[0])
+        bpy.context.scene.collection.objects.link(dummy)
+        bpy.ops.object.select_all(action='DESELECT')
+        dummy.select_set(True)
+
+        filepath = bpy.data.filepath
+        directory = os.path.dirname(filepath)
+
+        for data in self.export_list:
+            dummy.data = data
+            bpy.ops.export_scene.fbx(check_existing=False,
+                                     filepath=directory + "/" + data.name + ".fbx",
+                                     filter_glob="*.fbx",
+                                     use_selection=True,
+                                     object_types={'MESH'},
+                                     bake_space_transform=True,
+                                     mesh_smooth_type='OFF',
+                                     add_leaf_bones=False,
+                                     path_mode='ABSOLUTE',
+                                     axis_forward='X',
+                                     axis_up='Z',
+                                     apply_unit_scale=True,
+                                     apply_scale_options='FBX_SCALE_NONE',
+                                     global_scale=1.0,
+                                     use_triangles=False
+                                     )
+        bpy.data.objects.remove(dummy)
+        return
+
+    def add_to_export(self, obj) -> bool:
         if obj.type != 'MESH':
             return False
 
@@ -97,6 +132,7 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
         # only export unique mesh-data that is not linked from another blend (asset)
         if not data.is_library_indirect and data not in self.export_list:
             self.export_list.append(data)
+            self.export_ref.append(obj)
             self.reporter.message(f"{obj.name.ljust(table_justify)} -> {data.name}", category="Export-List")
             return True
         else:
@@ -107,7 +143,7 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
         container = dict()
 
         # general object parameters
-        container["OBJ_NAME"] = self.get_real_name(obj)
+        container["OBJ_NAME"] = self.get_real_name(obj).replace('.', '_')
         container["OBJ_TYPE"] = obj.type
 
         if world_matrix:
@@ -214,4 +250,5 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
         json_target.write(json.dumps(object_array, sort_keys=True, indent=4))
         self.reporter.message(f"INSTANCES COUNT: {global_count}", category="Final")
         self.reporter.verdict()
+        self.export_fbx()
         return {'FINISHED'}
