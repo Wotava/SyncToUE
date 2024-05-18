@@ -26,39 +26,42 @@ def get_node_group_input(modifier, input_display_name):
     return None
 
 
-class Report():
-    text = None
-    specialities = dict()
+class Report:
+    __text = None
+    __specialities = dict()
 
     def init(self):
-        self.text = bpy.data.texts.get('SyncReport')
-        if not self.text:
-            self.text = bpy.data.texts.new('SyncReport')
+        self.__text = bpy.data.texts.get('SyncReport')
+        if not self.__text:
+            self.__text = bpy.data.texts.new('SyncReport')
         else:
-            self.text.clear()
-        self.text.write(">BEGIN REPORT")
+            self.__text.clear()
+        self.__text.write(">BEGIN REPORT")
         self.nl(2)
+
+    def add_category(self, category: str):
+        if not self.__specialities.get(category):
+            self.__specialities.update({category: []})
 
     def message(self, text: str, nl_count=1, category='Log') -> None:
         if category == 'Log':
-            self.text.write(text)
+            self.__text.write(text)
             self.nl(nl_count)
         else:
-            if self.specialities.get(category):
-                self.specialities[category].append(text + "\n")
-            else:
-                self.specialities[category] = [text + "\n"]
+            self.add_category(category)
+            self.__specialities.get(category).append(text + "\n")
 
     def verdict(self):
-        for key, value in zip(self.specialities.keys(), self.specialities.values()):
-            self.text.write(">" + key.upper() + '\n')
+        for key, value in zip(self.__specialities.keys(), self.__specialities.values()):
+            self.__text.write(">" + key.upper() + '\n')
             for val in value:
-                self.text.write(val)
+                self.__text.write(val)
             self.nl(2)
+        self.__specialities.clear()
 
     def nl(self, count=1):
         for _ in range(count):
-            self.text.write("\n")
+            self.__text.write("\n")
 
 
 class SCENE_OP_DumpToJSON(bpy.types.Operator):
