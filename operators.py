@@ -1,6 +1,8 @@
 import bpy
 import json
 import os
+from mathutils import Vector, Euler, Matrix
+from math import pi
 
 unit_multiplier = 100.0
 light_multiplier = 1.0
@@ -66,8 +68,12 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
     bl_options = {'REGISTER', 'UNDO'}
 
     export_list = []
-    export_ref = []
     reporter = Report()
+
+    write_meshes: bpy.props.BoolProperty(
+        name="Write Meshes",
+        default=True
+    )
 
     @classmethod
     def poll(cls, context):
@@ -88,16 +94,37 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
         if self.export_list == 0:
             return
 
-        dummy = bpy.data.objects.new("Dummy", self.export_list[0])
-        bpy.context.scene.collection.objects.link(dummy)
         bpy.ops.object.select_all(action='DESELECT')
-        dummy.select_set(True)
 
         filepath = bpy.data.filepath
         directory = os.path.dirname(filepath)
 
+        # build ref list
+        export_ref = []
         for data in self.export_list:
-            dummy.data = data
+            for obj in bpy.data.objects:
+                if obj.data is data:
+                    export_ref.append(obj)
+                    break
+
+        for obj in export_ref:
+            data = obj.data
+
+            dummy = obj.copy()
+            dummy.data = obj.data.copy()
+
+            bpy.context.scene.collection.objects.link(dummy)
+            dummy.select_set(True)
+
+            bpy.context.view_layer.objects.active = dummy
+
+            bpy.ops.object.convert(target='MESH')
+            dummy.parent = None
+
+            dummy.location = Vector((0.0, 0.0, 0.0))
+            dummy.rotation_euler = Euler((0.0, 0.0, 0.0), 'XYZ')
+            dummy.scale = Vector((1.0, 1.0, 1.0))
+
             bpy.ops.export_scene.fbx(check_existing=False,
                                      filepath=directory + "/" + data.name + ".fbx",
                                      filter_glob="*.fbx",
@@ -114,7 +141,7 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
                                      global_scale=1.0,
                                      use_triangles=False
                                      )
-        bpy.data.objects.remove(dummy)
+            bpy.data.objects.remove(dummy)
         return
 
     def add_to_export(self, obj) -> bool:
@@ -132,27 +159,60 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
         # only export unique mesh-data that is not linked from another blend (asset)
         if not data.is_library_indirect and data not in self.export_list:
             self.export_list.append(data)
-            self.export_ref.append(obj)
             self.reporter.message(f"{obj.name.ljust(table_justify)} -> {data.name}", category="Export-List")
             return True
         else:
             return False
 
-
     def make_dict(self, obj, world_matrix=None) -> dict:
         container = dict()
+
+        params = bpy.context.scene.stu_parameters
 
         # general object parameters
         container["OBJ_NAME"] = self.get_real_name(obj).replace('.', '_')
         container["OBJ_TYPE"] = obj.type
 
         if world_matrix:
-            loc, rot, scale = world_matrix.decompose()
-            rot = rot.to_euler()
             container["ORIGIN"] = "Scatter"
         else:
-            loc, rot, scale = obj.location, obj.rotation_euler, obj.scale
+            world_matrix = obj.matrix_world
             container["ORIGIN"] = "Placed"
+
+        loc = world_matrix.to_translation()
+        rot = world_matrix.to_euler()
+        scale = world_matrix.to_scale()
+
+        for s in scale:
+            if s > 0:
+                continue
+        else:
+            scale_matrix_x = Matrix.Scale(scale[0], 3, (1.0, 0.0, 0.0))
+            scale_matrix_y = Matrix.Scale(scale[1], 3, (0.0, 1.0, 0.0))
+            scale_matrix_z = Matrix.Scale(scale[2], 3, (0.0, 0.0, 1.0))
+            scale_matrix_all = scale_matrix_x @ scale_matrix_y @ scale_matrix_z
+            rot = (rot.to_matrix() @ scale_matrix_all).to_euler()
+
+        rot = list(rot[0:3])
+
+        swizzle_rot = False
+        for i in range(3):
+            loc[i] = loc[i] * (1 - 2 * params.flip_loc[i])
+            rot[i] = rot[i] + params.rotation_offset[i]
+            rot[i] = rot[i] * (1 - 2 * params.flip_rot[i])
+            scale[i] = scale[i] * (1 - 2 * params.flip_scale[i])
+
+            if scale[i] < 0:
+                swizzle_rot = True
+
+            if params.abs_scale[i]:
+                scale[i] = abs(scale[i])
+
+            if params.adjust_rot:
+                rot[i] = -1 * pi + abs(rot[i])
+
+        if swizzle_rot and params.swizzle_neg_scale:
+            rot.reverse()
 
         container["LOCATION"] = (loc * unit_multiplier).to_tuple()
         container["ROTATION"] = rot[0:3]
@@ -189,6 +249,7 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
             json_target = bpy.data.texts.new("JSON_base")
         else:
             json_target.clear()
+            json_target.write("{\"array\":")
 
         object_array = []
 
@@ -248,7 +309,10 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
                 self.reporter.message(f"{obj.name}: Written as individual object", 2)
 
         json_target.write(json.dumps(object_array, sort_keys=True, indent=4))
+        json_target.write("}")
         self.reporter.message(f"INSTANCES COUNT: {global_count}", category="Final")
         self.reporter.verdict()
-        self.export_fbx()
+
+        if self.write_meshes:
+            self.export_fbx()
         return {'FINISHED'}
