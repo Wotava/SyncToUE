@@ -108,8 +108,12 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
 
         bpy.ops.object.select_all(action='DESELECT')
 
-        filepath = bpy.data.filepath
-        directory = os.path.dirname(filepath)
+        export_path = bpy.context.scene.stu_parameters.export_path
+        if len(export_path) == 0:
+            filepath = bpy.data.filepath
+            export_path = os.path.dirname(filepath)
+        else:
+            export_path = bpy.path.abspath(export_path)
 
         # build ref list
         export_ref = []
@@ -148,7 +152,7 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
             dummy.scale = Vector((1.0, 1.0, 1.0))
 
             bpy.ops.export_scene.fbx(check_existing=False,
-                                     filepath=directory + "/" + data.name + ".fbx",
+                                     filepath=export_path + "/" + data.name + ".fbx",
                                      filter_glob="*.fbx",
                                      use_selection=True,
                                      object_types={'MESH'},
@@ -273,7 +277,6 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
             json_target = bpy.data.texts.new("JSON_base")
         else:
             json_target.clear()
-            json_target.write("{\"array\":")
 
         object_array = []
 
@@ -329,8 +332,23 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
                 self.add_to_export(obj)
                 self.reporter.message(f"{obj.name}: Written as individual object", 2)
 
+        json_target.write("{\"array\":")
         json_target.write(json.dumps(object_array, sort_keys=True, indent=4))
         json_target.write("}")
+
+        json_path = context.scene.stu_parameters.json_path
+        if len(json_path) == 0:
+            filepath = bpy.data.filepath
+            directory = os.path.dirname(filepath)
+            json_disk = open(directory + "\\level_data.json", "a")
+            self.report({'INFO'}, "JSON was exported in .blend directory")
+        else:
+            json_disk = open(bpy.path.abspath(json_path), "a")
+
+        json_disk.truncate(0)
+        json_disk.write(json_target.as_string())
+        json_disk.close()
+
         self.reporter.message(f"INSTANCES COUNT: {global_count}", category="Final")
 
         if self.write_meshes:

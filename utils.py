@@ -1,5 +1,5 @@
 import bpy
-from bpy.props import FloatVectorProperty, BoolVectorProperty, BoolProperty
+from bpy.props import FloatVectorProperty, BoolVectorProperty, BoolProperty, StringProperty
 
 
 class ExportParameters(bpy.types.PropertyGroup):
@@ -37,3 +37,13 @@ class ExportParameters(bpy.types.PropertyGroup):
         size=3,
         default=[0.0, 0.0, 0.0]
     )
+
+    json_path: StringProperty(
+        name="JSON File",
+        subtype="FILE_PATH",
+        description="JSON file to export the scene data into")
+
+    export_path: StringProperty(
+        name="Export Dir",
+        subtype="DIR_PATH",
+        description="Directory to export the scene fbx into")
