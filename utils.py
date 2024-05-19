@@ -11,7 +11,7 @@ class ExportParameters(bpy.types.PropertyGroup):
     flip_rot: BoolVectorProperty(
         name="Rotation Flips",
         size=3,
-        default=[False, False, True]
+        default=[True, True, True]
     )
     adjust_rot: BoolProperty(
         name="Adjust rot to -pi + rot",
