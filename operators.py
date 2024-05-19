@@ -87,7 +87,6 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
         default=False
     )
 
-
     @classmethod
     def poll(cls, context):
         return True
@@ -358,7 +357,11 @@ class SCENE_OP_StartHandler(bpy.types.Operator):
     """Toggle Handler to catch edit mode changes"""
     bl_label = "Toggle StU handler"
     bl_idname = "scene.stu_toggle_handler"
-    bl_options = {'REGISTER', 'UNDO'}
+    bl_options = {'REGISTER'}
+
+    @classmethod
+    def poll(cls, context):
+        return True
 
     def execute(self, context):
         if context.scene.get('stu_handler_loaded') is True or context.scene.get('stu_handler_loaded') is None:
