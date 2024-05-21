@@ -31,6 +31,26 @@ def get_node_group_input(modifier, input_display_name):
     return None
 
 
+def get_modifier_pseudohash(mod) -> str:
+    values = ""
+    if mod.type == 'NODES':
+        for prop in mod.keys():
+            if prop.find('attribute') == -1:
+                values += str(mod.get(prop))
+    else:
+        properties = [p.identifier for p in list(mod.bl_rna.properties) if not p.is_readonly]
+        for prop in properties:
+            values += str(getattr(mod, prop))
+    return values
+
+
+def hash_modifier_stack(obj) -> int:
+    stack = ""
+    for mod in obj.modifiers:
+        stack += get_modifier_pseudohash(mod)
+    return hash(stack)
+
+
 class Report:
     __text = None
     __specialities = dict()
@@ -75,7 +95,9 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
     bl_idname = "scene.json_dump"
     bl_options = {'REGISTER', 'UNDO'}
 
-    export_list = []
+    exported_variants = []
+    data_variants = {}
+
     reporter = Report()
 
     write_meshes: BoolProperty(
@@ -96,16 +118,33 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
         bpy.context.scene.collection.objects.link(obj)
         obj.matrix_world = matrix
 
-    def get_real_name(self, obj) -> str:
-        if obj.data:
-            return obj.data.name
+    # data_pack: [data.name, vert_hash]
+    # this data allows unique identification of instances
+    def get_variation_index(self, data_pack) -> int:
+        variants = self.data_variants.get(data_pack[0])
+        if not variants:
+            self.data_variants.update({data_pack[0]: [data_pack[1]]})
+            return 0
         else:
-            return obj.name
+            if data_pack[1] not in variants:
+                variants.append(data_pack[1])
+                return len(variants) - 1
+            else:
+                return variants.index(data_pack[1])
 
-    def export_fbx(self):
-        if self.export_list == 0:
-            return
+    def get_bbox_delta_vector(self, obj) -> Vector:
+        matrix_world = obj.matrix_world
+        local_bbox_center = 0.125 * sum((Vector(b) for b in obj.bound_box), Vector())
+        global_bbox_center = matrix_world @ local_bbox_center
+        return global_bbox_center - matrix_world.to_translation()
 
+    def hash_local_vert_pos(self, obj) -> int:
+        return hash(tuple([v.co.to_tuple() for v in obj.data.vertices]))
+
+    # expects already "prepared" object on input
+    def export_fbx(self, obj, name=None):
+        if not obj:
+            raise Exception
         bpy.ops.object.select_all(action='DESELECT')
 
         export_path = bpy.context.scene.stu_parameters.export_path
@@ -115,95 +154,106 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
         else:
             export_path = bpy.path.abspath(export_path)
 
-        # build ref list
-        export_ref = []
-        for data in self.export_list:
-            if data.get('clean') is True and not self.write_all:
-                continue
-            else:
-                self.reporter.message(f"{data.name.ljust(table_justify)} was dirty",
-                                      category="Export-Filter")
-            for obj in bpy.data.objects:
-                if obj.data is data:
-                    export_ref.append(obj)
-                    break
-            else:
-                self.reporter.message(f"{data.name.ljust(table_justify)} -> failed to find obj ref",
-                                      category="Export-Errors")
-                continue
-            data['clean'] = True
-
-        for obj in export_ref:
+        if obj.is_evaluated:
+            data = bpy.data.meshes.new_from_object(obj)
+            dummy = bpy.data.objects.new(data.name, data)
+        else:
             data = obj.data
-
             dummy = obj.copy()
             dummy.data = obj.data.copy()
 
-            bpy.context.scene.collection.objects.link(dummy)
-            dummy.select_set(True)
+        bpy.context.scene.collection.objects.link(dummy)
+        dummy.select_set(True)
 
-            bpy.context.view_layer.objects.active = dummy
+        bpy.context.view_layer.objects.active = dummy
 
+        if not obj.is_evaluated:
             bpy.ops.object.convert(target='MESH')
-            dummy.parent = None
 
-            dummy.location = Vector((0.0, 0.0, 0.0))
-            dummy.rotation_euler = Euler((0.0, 0.0, 0.0), 'XYZ')
-            dummy.scale = Vector((1.0, 1.0, 1.0))
+        dummy.parent = None
+        dummy.location = Vector((0.0, 0.0, 0.0))
+        dummy.rotation_euler = Euler((0.0, 0.0, 0.0), 'XYZ')
+        dummy.scale = Vector((1.0, 1.0, 1.0))
 
-            bpy.ops.export_scene.fbx(check_existing=False,
-                                     filepath=export_path + "/" + data.name + ".fbx",
-                                     filter_glob="*.fbx",
-                                     use_selection=True,
-                                     object_types={'MESH'},
-                                     bake_space_transform=True,
-                                     mesh_smooth_type='OFF',
-                                     add_leaf_bones=False,
-                                     path_mode='ABSOLUTE',
-                                     axis_forward='X',
-                                     axis_up='Z',
-                                     apply_unit_scale=True,
-                                     apply_scale_options='FBX_SCALE_NONE',
-                                     global_scale=1.0,
-                                     use_triangles=False
-                                     )
-            bpy.data.objects.remove(dummy)
-        return
+        if not name:
+            name = data.name
+        bpy.ops.export_scene.fbx(check_existing=False,
+                                 filepath=export_path + "/" + name + ".fbx",
+                                 filter_glob="*.fbx",
+                                 use_selection=True,
+                                 object_types={'MESH'},
+                                 bake_space_transform=True,
+                                 mesh_smooth_type='OFF',
+                                 add_leaf_bones=False,
+                                 path_mode='ABSOLUTE',
+                                 axis_forward='X',
+                                 axis_up='Z',
+                                 apply_unit_scale=True,
+                                 apply_scale_options='FBX_SCALE_NONE',
+                                 global_scale=1.0,
+                                 use_triangles=False
+                                 )
+        bpy.data.objects.remove(dummy)
 
-    def add_to_export(self, obj) -> bool:
+    def try_export(self, obj, vert_hash, name) -> bool:
         if obj.type != 'MESH':
             return False
 
         # evaluated mesh data loses is_library_indirect flag, so we need to get the "real" mesh
         if obj.is_evaluated:
-            data = bpy.data.meshes.get(obj.data.name)
+            if hasattr(obj, 'original'):
+                data = bpy.data.meshes.get(obj.original.data.name)
+            else:
+                data = bpy.data.meshes.get(obj.data.name)
+
             if not data:
                 return False
         else:
             data = obj.data
 
         # only export unique mesh-data that is not linked from another blend (asset)
-        if not data.is_library_indirect and data not in self.export_list:
-            self.export_list.append(data)
-            self.reporter.message(f"{obj.name.ljust(table_justify)} -> {data.name}", category="Export-List")
+        # TODO calc delta between original "linked" data and inpit to catch unique variations of assets
+        if not data.is_library_indirect and [data, vert_hash] not in self.exported_variants:
+
+            if self.write_meshes:
+                self.export_fbx(obj, name)
+                self.exported_variants.append([data, vert_hash])
+
             return True
         else:
             return False
 
-    def make_dict(self, obj, world_matrix=None) -> dict:
+    def get_name(self, obj, vert_hash=None):
+        if obj.type == 'MESH':
+            if not vert_hash:
+                vert_hash = self.hash_local_vert_pos(obj)
+
+            if hasattr(obj, 'original'):
+                data_name = obj.original.data.name
+            else:
+                data_name = obj.data.name
+
+            index = self.get_variation_index([data_name, vert_hash])
+            name = f"{data_name}".replace('.', '_')
+            if index > 0:
+                name += f"_{index}"
+        else:
+            name = obj.name
+        return name
+
+    def make_dict(self, obj, name=None) -> dict:
         container = dict()
 
         params = bpy.context.scene.stu_parameters
 
         # general object parameters
-        container["OBJ_NAME"] = self.get_real_name(obj).replace('.', '_')
+        if not name:
+            name = self.get_name(obj)
+
+        container["OBJ_NAME"] = name
         container["OBJ_TYPE"] = obj.type
 
-        if world_matrix:
-            container["ORIGIN"] = "Scatter"
-        else:
-            world_matrix = obj.matrix_world
-            container["ORIGIN"] = "Placed"
+        world_matrix = obj.matrix_world
 
         loc = world_matrix.to_translation()
         rot = world_matrix.to_euler()
@@ -270,7 +320,7 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
 
     def execute(self, context):
         self.reporter.init()
-        self.export_list.clear()
+        self.exported_variants.clear()
 
         json_target = bpy.data.texts.get("JSON_base")
         if not json_target:
@@ -281,11 +331,8 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
         object_array = []
 
         depsgraph = bpy.context.evaluated_depsgraph_get()
-        global_count = 0
 
         for obj in context.visible_objects:
-            is_instanced = False
-
             self.reporter.message(f"{obj.name}: Begin write")
 
             if obj.type not in ['MESH', 'LIGHT']:
@@ -299,38 +346,23 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
                 self.reporter.message(f"{obj.name.ljust(table_justify)} -> {obj.data.name}",
                                       category="Possible name dupes")
 
-            if len(obj.modifiers) > 0:
-                for mod in obj.modifiers:
-                    if mod.type == 'NODES' and mod.node_group.name in instancing_nodes:
-                        if get_node_group_input(mod, "Decal Mode"):
-                            self.reporter.message(f"{obj.name} should be baked: Decal Mode",
-                                                  category="Export")
-                        elif get_node_group_input(mod, "Realize Instances"):
-                            self.reporter.message(f"{obj.name} possibly should be baked: Realize Instances",
-                                                  category="Export")
-                        else:
-                            is_instanced = True
-                            self.reporter.message(f"{obj.name}: found {mod.node_group.name}")
-                    else:
-                        self.reporter.message(f"{obj.name}: {mod.name} was ignored")
+            evaluated_obj = obj.evaluated_get(depsgraph)
 
-            if is_instanced:
-                # unwrap geonodes stack if present
-                evaluated_obj = obj.evaluated_get(depsgraph)
-                i = 0
-                for inst in depsgraph.object_instances:
-                    if inst.is_instance and inst.parent == evaluated_obj:
-                        object_array.append(self.make_dict(inst.object, inst.matrix_world))
-                        self.add_to_export(inst.object)
-                        i += 1
-                self.reporter.message(f"{obj.name}: Wrote {i} spawned instances", 2)
-                if i == 0:
-                    self.reporter.message(f"{obj.name}: 0 instances were written, check stack", category='Error')
-                global_count += i
-            else:
-                object_array.append(self.make_dict(obj))
-                self.add_to_export(obj)
-                self.reporter.message(f"{obj.name}: Written as individual object", 2)
+            for inst in depsgraph.object_instances:
+                if inst.is_instance and inst.parent == evaluated_obj:
+                    if inst.object.type == 'MESH' and inst.object.data and len(inst.object.data.polygons) > 1:
+                        vert_hash = self.hash_local_vert_pos(inst.object)
+                        name = self.get_name(inst.object, vert_hash)
+                        self.try_export(inst.object, vert_hash, name)
+                    else:
+                        name = inst.object.name
+                    object_array.append(self.make_dict(inst.object, name))
+
+            if len(evaluated_obj.data.polygons) > 1:
+                vert_hash = self.hash_local_vert_pos(evaluated_obj)
+                name = self.get_name(evaluated_obj, vert_hash)
+                if self.try_export(evaluated_obj, vert_hash, name):
+                    object_array.append(self.make_dict(evaluated_obj, name))
 
         json_target.write("{\"array\":")
         json_target.write(json.dumps(object_array, sort_keys=True, indent=4))
@@ -348,11 +380,6 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
         json_disk.truncate(0)
         json_disk.write(json_target.as_string())
         json_disk.close()
-
-        self.reporter.message(f"INSTANCES COUNT: {global_count}", category="Final")
-
-        if self.write_meshes:
-            self.export_fbx()
 
         self.reporter.verdict()
         return {'FINISHED'}
