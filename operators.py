@@ -108,6 +108,11 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
         name="Write All",
         default=False
     )
+    extra_precision: BoolProperty(
+        name="Extra Precision Instances",
+        description="Hash both vertices and faces when making variation signature",
+        default=False
+    )
 
     @classmethod
     def poll(cls, context):
@@ -118,7 +123,7 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
         bpy.context.scene.collection.objects.link(obj)
         obj.matrix_world = matrix
 
-    # data_pack: [data.name, vert_hash]
+    # data_pack: [data.name, geo_hash]
     # this data allows unique identification of instances
     def get_variation_index(self, data_pack) -> int:
         variants = self.data_variants.get(data_pack[0])
@@ -138,8 +143,18 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
         global_bbox_center = matrix_world @ local_bbox_center
         return global_bbox_center - matrix_world.to_translation()
 
-    def hash_local_vert_pos(self, obj) -> int:
-        return hash(tuple([v.co.to_tuple() for v in obj.data.vertices]))
+    def get_polygon_data(self, polygon) -> tuple:
+        res = list(polygon.center)
+        res.append(polygon.area)
+        return tuple(res)
+
+    def hash_geometry(self, obj) -> int:
+        if self.extra_precision:
+            vert_tuple = tuple([v.co.to_tuple() for v in obj.data.vertices])
+            face_tuple = tuple([self.get_polygon_data(f) for f in obj.data.polygons])
+            return hash(vert_tuple + face_tuple)
+        else:
+            return hash(tuple([self.get_polygon_data(f) for f in obj.data.polygons]))
 
     # expects already "prepared" object on input
     def export_fbx(self, obj, name=None):
@@ -195,7 +210,7 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
                                  )
         bpy.data.objects.remove(dummy)
 
-    def try_export(self, obj, vert_hash, name) -> bool:
+    def try_export(self, obj, geo_hash, name) -> bool:
         if obj.type != 'MESH':
             return False
 
@@ -213,27 +228,27 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
 
         # only export unique mesh-data that is not linked from another blend (asset)
         # TODO calc delta between original "linked" data and inpit to catch unique variations of assets
-        if not data.is_library_indirect and [data, vert_hash] not in self.exported_variants:
+        if not data.is_library_indirect and [data, geo_hash] not in self.exported_variants:
 
             if self.write_meshes:
                 self.export_fbx(obj, name)
-                self.exported_variants.append([data, vert_hash])
+                self.exported_variants.append([data, geo_hash])
 
             return True
         else:
             return False
 
-    def get_name(self, obj, vert_hash=None):
+    def get_name(self, obj, geo_hash=None):
         if obj.type == 'MESH':
-            if not vert_hash:
-                vert_hash = self.hash_local_vert_pos(obj)
+            if not geo_hash:
+                geo_hash = self.hash_geometry(obj)
 
             if hasattr(obj, 'original'):
                 data_name = obj.original.data.name
             else:
                 data_name = obj.data.name
 
-            index = self.get_variation_index([data_name, vert_hash])
+            index = self.get_variation_index([data_name, geo_hash])
             name = f"{data_name}".replace('.', '_')
             if index > 0:
                 name += f"_{index}"
@@ -351,17 +366,17 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
             for inst in depsgraph.object_instances:
                 if inst.is_instance and inst.parent == evaluated_obj:
                     if inst.object.type == 'MESH' and inst.object.data and len(inst.object.data.polygons) > 1:
-                        vert_hash = self.hash_local_vert_pos(inst.object)
-                        name = self.get_name(inst.object, vert_hash)
-                        self.try_export(inst.object, vert_hash, name)
+                        geo_hash = self.hash_geometry(inst.object)
+                        name = self.get_name(inst.object, geo_hash)
+                        self.try_export(inst.object, geo_hash, name)
                     else:
                         name = inst.object.name
                     object_array.append(self.make_dict(inst.object, name))
 
             if len(evaluated_obj.data.polygons) > 1:
-                vert_hash = self.hash_local_vert_pos(evaluated_obj)
-                name = self.get_name(evaluated_obj, vert_hash)
-                if self.try_export(evaluated_obj, vert_hash, name):
+                geo_hash = self.hash_geometry(evaluated_obj)
+                name = self.get_name(evaluated_obj, geo_hash)
+                if self.try_export(evaluated_obj, geo_hash, name):
                     object_array.append(self.make_dict(evaluated_obj, name))
 
         json_target.write("{\"array\":")
