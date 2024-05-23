@@ -7,6 +7,8 @@ import os
 from mathutils import Vector, Euler, Matrix
 from math import pi
 
+import numpy as np
+
 unit_multiplier = 100.0
 light_multiplier = 1.0
 
@@ -110,8 +112,8 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
     )
     extra_precision: BoolProperty(
         name="Extra Precision Instances",
-        description="Hash both vertices and faces when making variation signature",
-        default=False
+        description="Hash both faces and attributes on export",
+        default=True
     )
 
     @classmethod
@@ -137,24 +139,31 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
             else:
                 return variants.index(data_pack[1])
 
-    def get_bbox_delta_vector(self, obj) -> Vector:
-        matrix_world = obj.matrix_world
-        local_bbox_center = 0.125 * sum((Vector(b) for b in obj.bound_box), Vector())
-        global_bbox_center = matrix_world @ local_bbox_center
-        return global_bbox_center - matrix_world.to_translation()
+    def get_polygon_data(self, data) -> np.ndarray:
+        """Returns flat list of all face positions extended with face areas"""
+        centers = np.zeros(len(data.polygons) * 3, dtype=float)
+        areas = np.zeros(len(data.polygons), dtype=float)
+        data.polygons.foreach_get("center", centers)
+        data.polygons.foreach_get("area", areas)
+        return np.concatenate((centers, areas))
 
-    def get_polygon_data(self, polygon) -> tuple:
-        res = list(polygon.center)
-        res.append(polygon.area)
-        return tuple(res)
+    def hash_uv_maps(self, data):
+        """Hash UV coordinates of all UV maps and return list of hashes"""
+        if len(data.uv_layers) == 0:
+            return 0
+
+        hashes = []
+        container = np.zeros(len(data.uv_layers[0].uv.values()) * 2, dtype=float)
+        for uvmap in data.uv_layers:
+            uvmap.uv.foreach_get("vector", container)
+            hashes.append(hash(container.tobytes()))
+
+        return hashes
 
     def hash_geometry(self, obj) -> int:
-        if self.extra_precision:
-            vert_tuple = tuple([v.co.to_tuple() for v in obj.data.vertices])
-            face_tuple = tuple([self.get_polygon_data(f) for f in obj.data.polygons])
-            return hash(vert_tuple + face_tuple)
-        else:
-            return hash(tuple([self.get_polygon_data(f) for f in obj.data.polygons]))
+        face_hash = self.get_polygon_data(obj.data).tobytes()
+        uv_hash = str(self.hash_uv_maps(obj.data))
+        return hash(tuple([face_hash, uv_hash]))
 
     # expects already "prepared" object on input
     def export_fbx(self, obj, name=None):
