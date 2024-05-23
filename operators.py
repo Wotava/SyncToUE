@@ -338,7 +338,7 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
             elif obj.data.type == 'SPOT':
                 container["LIGHT_SIZE"] = obj.data.spot_size
 
-            container["LIGHT_INTENSITY"] = obj.data.energy * light_multiplier
+            container["LIGHT_INTENSITY"] = obj.data.energy / (4 * pi)
 
         return container
 
@@ -363,6 +363,10 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
                 self.reporter.message(f"{obj.name}: unsupported type {obj.type}", category="Skip")
                 continue
 
+            if obj.type == 'LIGHT':
+                object_array.append(self.make_dict(obj))
+                continue
+
             if obj.name[:-4] not in obj.data.name or obj.data.name[:-4] not in obj.name:
                 self.reporter.message(f"{obj.name.ljust(table_justify)} -> {obj.data.name}",
                                       category="Naming mismatch")
@@ -380,9 +384,11 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
                         self.try_export(inst.object, geo_hash, name)
                     else:
                         name = inst.object.name
-                    object_array.append(self.make_dict(inst.object, name))
 
-            if len(evaluated_obj.data.polygons) > 1:
+                    if inst.object.type in ['MESH', 'LIGHT']:
+                        object_array.append(self.make_dict(inst.object, name))
+
+            if evaluated_obj.data and len(evaluated_obj.data.polygons) > 0:
                 geo_hash = self.hash_geometry(evaluated_obj)
                 name = self.get_name(evaluated_obj, geo_hash)
                 if self.try_export(evaluated_obj, geo_hash, name):
