@@ -413,38 +413,3 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
 
         self.reporter.verdict()
         return {'FINISHED'}
-
-
-last_state = {'OBJECT'}
-
-
-@persistent
-def edit_mode_handler(scene):
-    if last_state != {bpy.context.mode}:
-        last_state.pop()
-        last_state.add(bpy.context.mode)
-        for obj in bpy.context.selected_objects:
-            if obj.type == 'MESH':
-                obj.data['clean'] = False
-
-
-class SCENE_OP_StartHandler(bpy.types.Operator):
-    """Toggle Handler to catch edit mode changes"""
-    bl_label = "Toggle StU handler"
-    bl_idname = "scene.stu_toggle_handler"
-    bl_options = {'REGISTER'}
-
-    @classmethod
-    def poll(cls, context):
-        return True
-
-    def execute(self, context):
-        if context.scene.get('stu_handler_loaded') is True or context.scene.get('stu_handler_loaded') is None:
-            for h in bpy.app.handlers.depsgraph_update_post:
-                if h.__name__ == 'edit_mode_handler':
-                    bpy.app.handlers.depsgraph_update_post.remove(h)
-            context.scene['stu_handler_loaded'] = False
-        else:
-            bpy.app.handlers.depsgraph_update_post.append(edit_mode_handler)
-            context.scene['stu_handler_loaded'] = True
-        return {'FINISHED'}

@@ -14,11 +14,6 @@ class VIEW3D_PT_ModifierManager(bpy.types.Panel):
         layout = self.layout
 
         row = layout.row()
-        row.label(text=f"Handler loaded: {context.scene.get('stu_handler_loaded')}")
-        row = layout.row()
-        row.operator("scene.stu_toggle_handler", text="Toggle Handler")
-
-        row = layout.row()
         row.prop(context.scene.stu_parameters, "json_path")
 
         row = layout.row()
