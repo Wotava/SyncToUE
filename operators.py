@@ -106,24 +106,10 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
         name="Write Meshes",
         default=True
     )
-    write_all: BoolProperty(
-        name="Write All",
-        default=False
-    )
-    extra_precision: BoolProperty(
-        name="Extra Precision Instances",
-        description="Hash both faces and attributes on export",
-        default=True
-    )
 
     @classmethod
     def poll(cls, context):
         return True
-
-    def debug_spawn(self, matrix):
-        obj = bpy.data.objects.new("Test", None)
-        bpy.context.scene.collection.objects.link(obj)
-        obj.matrix_world = matrix
 
     # data_pack: [data.name, geo_hash]
     # this data allows unique identification of instances
