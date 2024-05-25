@@ -100,8 +100,6 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
     exported_variants = []
     data_variants = {}
 
-    reporter = Report()
-
     write_meshes: BoolProperty(
         name="Write Meshes",
         default=True
@@ -329,7 +327,6 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
         return container
 
     def execute(self, context):
-        self.reporter.init()
         self.exported_variants.clear()
 
         json_target = bpy.data.texts.get("JSON_base")
@@ -343,22 +340,12 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
         depsgraph = bpy.context.evaluated_depsgraph_get()
 
         for obj in context.visible_objects:
-            self.reporter.message(f"{obj.name}: Begin write")
-
             if obj.type not in ['MESH', 'LIGHT']:
-                self.reporter.message(f"{obj.name}: unsupported type {obj.type}", category="Skip")
                 continue
 
             if obj.type == 'LIGHT':
                 object_array.append(self.make_dict(obj))
                 continue
-
-            if obj.name[:-4] not in obj.data.name or obj.data.name[:-4] not in obj.name:
-                self.reporter.message(f"{obj.name.ljust(table_justify)} -> {obj.data.name}",
-                                      category="Naming mismatch")
-            if len(obj.data.name) > 4 and obj.data.name[-4] == '.' and obj.data.name[-3:].isnumeric():
-                self.reporter.message(f"{obj.name.ljust(table_justify)} -> {obj.data.name}",
-                                      category="Possible name dupes")
 
             evaluated_obj = obj.evaluated_get(depsgraph)
 
@@ -397,5 +384,4 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
         json_disk.write(json_target.as_string())
         json_disk.close()
 
-        self.reporter.verdict()
         return {'FINISHED'}
