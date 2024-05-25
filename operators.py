@@ -100,6 +100,11 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
     exported_variants = []
     data_variants = {}
 
+    hash_data = {}
+    hash_count = {}
+
+    export_scene = None
+
     write_meshes: BoolProperty(
         name="Write Meshes",
         default=True
@@ -231,23 +236,14 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
         else:
             return False
 
-    def get_name(self, obj, geo_hash=None):
-        if obj.type == 'MESH':
-            if not geo_hash:
-                geo_hash = self.hash_geometry(obj)
-
-            if hasattr(obj, 'original'):
-                data_name = obj.original.data.name
-            else:
-                data_name = obj.data.name
-
-            index = self.get_variation_index([data_name, geo_hash])
-            name = f"{data_name}".replace('.', '_')
-            if index > 0:
-                name += f"_{index}"
-        else:
-            name = obj.name
-        return name
+    def make_obj_name(self, mesh_data, count) -> str:
+        base_name = mesh_data.name
+        if base_name[:3] != 'SM_':
+            base_name = 'SM_' + base_name
+        base_name = base_name.replace('.', '_')
+        if count > 0:
+            base_name += f"_{count}"
+        return base_name
 
     def make_dict(self, obj, name=None) -> dict:
         container = dict()
@@ -256,27 +252,12 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
 
         # general object parameters
         if not name:
-            name = self.get_name(obj)
+            name = obj.name
 
         container["OBJ_NAME"] = name
         container["OBJ_TYPE"] = obj.type
 
-        world_matrix = obj.matrix_world
-
-        loc = world_matrix.to_translation()
-        rot = world_matrix.to_euler()
-        scale = world_matrix.to_scale()
-
-        for s in scale:
-            if s > 0:
-                continue
-        else:
-            scale_matrix_x = Matrix.Scale(scale[0], 3, (1.0, 0.0, 0.0))
-            scale_matrix_y = Matrix.Scale(scale[1], 3, (0.0, 1.0, 0.0))
-            scale_matrix_z = Matrix.Scale(scale[2], 3, (0.0, 0.0, 1.0))
-            scale_matrix_all = scale_matrix_x @ scale_matrix_y @ scale_matrix_z
-            rot = (rot.to_matrix() @ scale_matrix_all).to_euler()
-
+        loc, rot, scale = self.get_world_transform(obj)
         rot = list(rot[0:3])
 
         swizzle_rot = False
@@ -326,6 +307,53 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
 
         return container
 
+    def get_world_transform(self, obj):
+        world_matrix = obj.matrix_world
+
+        loc = world_matrix.to_translation()
+        rot = world_matrix.to_euler()
+        scale = world_matrix.to_scale()
+
+        scale_matrix = Matrix.Diagonal(scale)
+
+        for s in scale:
+            if s > 0:
+                continue
+        else:
+            rot = (rot.to_matrix() @ scale_matrix).to_euler()
+
+        return loc, rot, scale
+
+    def copy_transform(self, source, target) -> None:
+        s_loc, s_rot, s_scale = self.get_world_transform(source)
+        target.location = s_loc
+        target.scale = s_scale
+        target.rotation_euler = s_rot
+
+    def duplicate_to_export(self, obj) -> None:
+        geo_hash = self.hash_geometry(obj)
+        if geo_hash not in self.hash_data:
+            # make evaluated copy mesh data
+            new_mesh = bpy.data.meshes.new_from_object(obj)
+            self.hash_data.update({geo_hash: new_mesh})
+            self.hash_count.update({geo_hash: 0})
+        else:
+            # make linked copy of already evaluated and realised mesh data
+            # and increment counter
+            new_mesh = self.hash_data.get(geo_hash)
+            self.hash_count[geo_hash] += 1
+
+        # link to export scene, generate name accordingly
+        # write object custom property with count for later use with UV offset
+        count = self.hash_count.get(geo_hash)
+        name = self.make_obj_name(new_mesh, count)
+        new_obj = bpy.data.objects.new(name, new_mesh)
+        new_obj['instance_count'] = count
+        self.copy_transform(obj, new_obj)
+
+        self.export_scene.collection.objects.link(new_obj)
+        return
+
     def execute(self, context):
         self.exported_variants.clear()
 
@@ -339,6 +367,12 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
 
         depsgraph = bpy.context.evaluated_depsgraph_get()
 
+        if bpy.data.scenes.get('ExportScene'):
+            self.export_scene = bpy.data.scenes.get('ExportScene')
+        else:
+            self.export_scene = bpy.data.scenes.new('ExportScene')
+
+        # PASS 1: make copy of current scene with all objects without modifiers
         for obj in context.visible_objects:
             if obj.type not in ['MESH', 'LIGHT']:
                 continue
@@ -352,20 +386,16 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
             for inst in depsgraph.object_instances:
                 if inst.is_instance and inst.parent == evaluated_obj:
                     if inst.object.type == 'MESH' and inst.object.data and len(inst.object.data.polygons) > 1:
-                        geo_hash = self.hash_geometry(inst.object)
-                        name = self.get_name(inst.object, geo_hash)
-                        self.try_export(inst.object, geo_hash, name)
-                    else:
-                        name = inst.object.name
+                        self.duplicate_to_export(inst.object)
 
-                    if inst.object.type in ['MESH', 'LIGHT']:
-                        object_array.append(self.make_dict(inst.object, name))
+                    elif inst.object.type == 'LIGHT':
+                        # we don't export lights, just write it straight to json and forget
+                        object_array.append(self.make_dict(inst.object, inst.object.name))
 
             if evaluated_obj.data and len(evaluated_obj.data.polygons) > 0:
-                geo_hash = self.hash_geometry(evaluated_obj)
-                name = self.get_name(evaluated_obj, geo_hash)
-                if self.try_export(evaluated_obj, geo_hash, name):
-                    object_array.append(self.make_dict(evaluated_obj, name))
+                self.duplicate_to_export(evaluated_obj)
+
+        return {'FINISHED'}
 
         json_target.write("{\"array\":")
         json_target.write(json.dumps(object_array, sort_keys=True, indent=4))
