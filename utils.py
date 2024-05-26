@@ -1,5 +1,5 @@
 import bpy
-from bpy.props import FloatVectorProperty, BoolVectorProperty, BoolProperty, StringProperty
+from bpy.props import FloatVectorProperty, BoolVectorProperty, BoolProperty, StringProperty, FloatProperty
 
 
 class ExportParameters(bpy.types.PropertyGroup):
@@ -47,3 +47,15 @@ class ExportParameters(bpy.types.PropertyGroup):
         name="Export Dir",
         subtype="DIR_PATH",
         description="Directory to export the scene fbx into")
+
+    target_density: FloatProperty(
+        name="Target Density",
+        description="In p/m on 4k texture",
+        default=256.0
+    )
+
+    def draw(self, layout):
+        for prop in list(self.__annotations__):
+            if getattr(self, prop):
+                row = layout.row()
+                row.prop(self, prop)

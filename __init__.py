@@ -20,6 +20,7 @@ bl_info = {
 }
 classes = [
     operators.SCENE_OP_DumpToJSON,
+    operators.SCENE_OP_TestContext,
     ui.VIEW3D_PT_ModifierManager,
     utils.ExportParameters,
 ]

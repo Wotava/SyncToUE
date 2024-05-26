@@ -1,6 +1,8 @@
+import random
+
 import bpy
 from bpy.app.handlers import persistent
-from bpy.props import BoolProperty
+from bpy.props import BoolProperty, IntProperty
 
 import json
 import os
@@ -19,6 +21,7 @@ morph_nodes = ["MG_StairGenerator"]
 
 last_mode = 'OBJECT'
 
+UV_Layers = ['UVMap', 'UVAtlas', 'UVPanelPreset', 'UVInset']
 
 def snake_case(string: str) -> str:
     return string.lower().replace(" ", "_")
@@ -98,7 +101,6 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
     bl_options = {'REGISTER', 'UNDO'}
 
     exported_variants = []
-    data_variants = {}
 
     hash_data = {}
     hash_count = {}
@@ -112,21 +114,9 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
 
     @classmethod
     def poll(cls, context):
-        return True
-
-    # data_pack: [data.name, geo_hash]
-    # this data allows unique identification of instances
-    def get_variation_index(self, data_pack) -> int:
-        variants = self.data_variants.get(data_pack[0])
-        if not variants:
-            self.data_variants.update({data_pack[0]: [data_pack[1]]})
-            return 0
-        else:
-            if data_pack[1] not in variants:
-                variants.append(data_pack[1])
-                return len(variants) - 1
-            else:
-                return variants.index(data_pack[1])
+        if context.workspace.name != 'UV Editing':
+            cls.poll_message_set("Only works from default UV Editing workspace. Workspace should have exact name 'UV Editing' and contain UV area")
+        return context.workspace.name == 'UV Editing'
 
     def get_polygon_data(self, data) -> np.ndarray:
         """Returns flat list of all face positions extended with face areas"""
@@ -155,10 +145,9 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
         return hash(tuple([face_hash, uv_hash]))
 
     # expects already "prepared" object on input
-    def export_fbx(self, obj, name=None):
-        if not obj:
+    def export_fbx(self, obj, target='UE'):
+        if not obj and target == 'UE':
             raise Exception
-        bpy.ops.object.select_all(action='DESELECT')
 
         export_path = bpy.context.scene.stu_parameters.export_path
         if len(export_path) == 0:
@@ -167,29 +156,26 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
         else:
             export_path = bpy.path.abspath(export_path)
 
-        if obj.is_evaluated:
-            data = bpy.data.meshes.new_from_object(obj)
-            dummy = bpy.data.objects.new(data.name, data)
-        else:
-            data = obj.data
+        if target == 'UE':
+            bpy.ops.object.select_all(action='DESELECT')
+
+            export_path += '\\UnrealEngine'
+            name = obj.name
             dummy = obj.copy()
-            dummy.data = obj.data.copy()
+            bpy.context.scene.collection.objects.link(dummy)
+            dummy.select_set(True)
 
-        bpy.context.scene.collection.objects.link(dummy)
-        dummy.select_set(True)
+            bpy.context.view_layer.objects.active = dummy
 
-        bpy.context.view_layer.objects.active = dummy
+            dummy.parent = None
+            dummy.location = Vector((0.0, 0.0, 0.0))
+            dummy.rotation_euler = Euler((0.0, 0.0, 0.0), 'XYZ')
+            dummy.scale = Vector((1.0, 1.0, 1.0))
+        else:
+            bpy.ops.object.select_all(action='SELECT')
+            export_path += '\\Houdini'
+            name = bpy.path.basename(bpy.context.blend_data.filepath)
 
-        if not obj.is_evaluated:
-            bpy.ops.object.convert(target='MESH')
-
-        dummy.parent = None
-        dummy.location = Vector((0.0, 0.0, 0.0))
-        dummy.rotation_euler = Euler((0.0, 0.0, 0.0), 'XYZ')
-        dummy.scale = Vector((1.0, 1.0, 1.0))
-
-        if not name:
-            name = data.name
         bpy.ops.export_scene.fbx(check_existing=False,
                                  filepath=export_path + "/" + name + ".fbx",
                                  filter_glob="*.fbx",
@@ -206,43 +192,16 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
                                  global_scale=1.0,
                                  use_triangles=False
                                  )
-        bpy.data.objects.remove(dummy)
 
-    def try_export(self, obj, geo_hash, name) -> bool:
-        if obj.type != 'MESH':
-            return False
-
-        # evaluated mesh data loses is_library_indirect flag, so we need to get the "real" mesh
-        if obj.is_evaluated:
-            if hasattr(obj, 'original'):
-                data = bpy.data.meshes.get(obj.original.data.name)
-            else:
-                data = bpy.data.meshes.get(obj.data.name)
-
-            if not data:
-                return False
-        else:
-            data = obj.data
-
-        # only export unique mesh-data that is not linked from another blend (asset)
-        # TODO calc delta between original "linked" data and inpit to catch unique variations of assets
-        if not data.is_library_indirect and [data, geo_hash] not in self.exported_variants:
-
-            if self.write_meshes:
-                self.export_fbx(obj, name)
-                self.exported_variants.append([data, geo_hash])
-
-            return True
-        else:
-            return False
+        if target == 'UE':
+            bpy.data.objects.remove(dummy)
 
     def make_obj_name(self, mesh_data, count) -> str:
         base_name = mesh_data.name
         if base_name[:3] != 'SM_':
             base_name = 'SM_' + base_name
         base_name = base_name.replace('.', '_')
-        if count > 0:
-            base_name += f"_{count}"
+        base_name += f"_{count}"
         return base_name
 
     def make_dict(self, obj, name=None) -> dict:
@@ -356,14 +315,15 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
 
     def execute(self, context):
         self.exported_variants.clear()
+        self.hash_count.clear()
+        self.hash_data.clear()
+        object_array = []
 
         json_target = bpy.data.texts.get("JSON_base")
         if not json_target:
             json_target = bpy.data.texts.new("JSON_base")
         else:
             json_target.clear()
-
-        object_array = []
 
         depsgraph = bpy.context.evaluated_depsgraph_get()
 
@@ -395,8 +355,92 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
             if evaluated_obj.data and len(evaluated_obj.data.polygons) > 0:
                 self.duplicate_to_export(evaluated_obj)
 
-        return {'FINISHED'}
+        # PASS 2: pack all geometry, set texel density
+        # switch scene to export and context to uv-view/3d-view by the name 'UV Editing'
+        context.window.scene = self.export_scene
+        bpy.ops.object.select_all(action='DESELECT')
+        bpy.ops.object.select_all(action='SELECT')
 
+        context.view_layer.objects.active = context.selected_objects[0]
+
+        if context.workspace.name != 'UV Editing':
+            self.report({'ERROR'}, "Please open default UV Editing workspace with exact name 'UV Editing'")
+            return {'CANCELLED'}
+
+        for area in bpy.context.screen.areas:
+            if area.type == 'IMAGE_EDITOR':
+                uv_area = area
+                break
+        else:
+            self.report({'ERROR'}, "Failed to find UV area, reset workspace")
+            return {'CANCELLED'}
+
+        bpy.ops.object.mode_set(mode='EDIT')
+        bpy.ops.mesh.select_all(action='SELECT')
+
+        # override context to UV editor, try unwrap
+        with bpy.context.temp_override(area=uv_area):
+            bpy.ops.uv.select_all(action='SELECT')
+
+            self.export_scene.uvpm3_props.normalize_scale = True
+            bpy.ops.uvpackmaster3.pack(mode_id="pack.single_tile", pack_to_others=False)
+
+        bpy.ops.object.mode_set(mode='OBJECT')
+
+        self.export_scene.td.units = '1'  # p/m units
+        self.export_scene.td.texture_size = '3'  # 4096x4096 texture size
+        bpy.ops.object.texel_density_check()
+        uv_multiplier = 256.0 / float(self.export_scene.td.density)
+
+        # scale UVs and find V max to determine base offset for instances
+        max_v = 0.0
+        center = (0.0, 0.0)
+        S = Matrix.Diagonal((uv_multiplier, uv_multiplier))
+        for obj in context.visible_objects:
+            if obj.name[-2:] == '_0':
+                uv = obj.data.uv_layers['UVMap']
+                uv_temp = np.zeros(len(uv.data) * 2, dtype=float)
+                uv.data.foreach_get('uv', uv_temp)
+                scaled_uv = np.dot(uv_temp.reshape((-1, 2)) - center, S) + center
+                uv.data.foreach_set('uv', scaled_uv.ravel())
+                max_v = max(uv_temp[1::2].max() * uv_multiplier, max_v)
+        print(max_v)
+
+        # PASS 3: export objects to UE/Houdini folders and write JSON
+
+        # I can't get "fresh" mesh data blocks from here for some reason if I don't switch back and forth
+        # between edit and object modes after making all objects single-user
+        # So first I write JSON and make mesh data single user, then switch context mode and then offset UVs
+        for obj in bpy.context.visible_objects:
+            object_array.append(self.make_dict(obj, obj.data.name))
+
+        bpy.ops.object.select_all(action='SELECT')
+        bpy.ops.object.make_single_user(type='SELECTED_OBJECTS', object=True, obdata=True, material=False,
+                                        animation=False, obdata_animation=True)
+        bpy.ops.object.mode_set(mode='EDIT')
+        bpy.ops.object.mode_set(mode='OBJECT')
+        bpy.context.view_layer.update()
+
+        for obj in bpy.context.visible_objects:
+            if obj.name.split('_')[-1] == '0':
+                # export as unique
+                self.export_fbx(obj, target='UE')
+                pass
+            else:
+                target_uv = obj.data.uv_layers.get('UVMap')
+                if not target_uv:
+                    self.report({'ERROR'}, "UVAtlas not found, this should NOT happen ever")
+                    return {'CANCELLED'}
+
+                offset = max_v * (int(obj.name.split('_')[-1]))
+                uv_temp = np.zeros(len(target_uv.data) * 2, dtype=float)
+                target_uv.data.foreach_get('uv', uv_temp)
+                uv_temp[1::2] += offset
+                target_uv.data.foreach_set('uv', uv_temp)
+
+        self.export_fbx(None, target='Houdini')
+
+        # PASS 4: fill and save internal and on-disk JSON files
         json_target.write("{\"array\":")
         json_target.write(json.dumps(object_array, sort_keys=True, indent=4))
         json_target.write("}")
@@ -414,4 +458,33 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
         json_disk.write(json_target.as_string())
         json_disk.close()
 
+        return {'FINISHED'}
+
+
+def dump_context(context_base, filename):
+    context = context_base.copy()
+    text = bpy.data.texts.get(filename)
+    if not text:
+        text = bpy.data.texts.new(filename)
+    for key, value in zip(context.keys(), context.values()):
+        if hasattr(value, 'type'):
+            text.write(f"{key} -> {value} -> {value.type}\n")
+        else:
+            text.write(f"{key} -> {value}\n")
+    del context
+
+
+class SCENE_OP_TestContext(bpy.types.Operator):
+    """"""
+    bl_label = "Test Context"
+    bl_idname = "scene.test_context"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    @classmethod
+    def poll(cls, context):
+        return True
+
+    def execute(self, context):
+        bpy.ops.uv.select_all(action='SELECT')
+        dump_context(context, 'UV')
         return {'FINISHED'}
