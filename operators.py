@@ -176,6 +176,10 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
             export_path += '\\Houdini'
             name = bpy.path.basename(bpy.context.blend_data.filepath)
 
+        is_exist = os.path.exists(export_path)
+        if not is_exist:
+            os.makedirs(export_path)
+
         bpy.ops.export_scene.fbx(check_existing=False,
                                  filepath=export_path + "/" + name + ".fbx",
                                  filter_glob="*.fbx",
