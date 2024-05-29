@@ -1,13 +1,13 @@
 import random
 
 import bpy
-from bpy.app.handlers import persistent
+import mathutils
 from bpy.props import BoolProperty, IntProperty
 
 import json
 import os
 from mathutils import Vector, Euler, Matrix
-from math import pi
+from math import pi, sqrt
 
 import numpy as np
 
@@ -366,7 +366,6 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
         # switch scene to export and context to uv-view/3d-view by the name 'UV Editing'
         print(f"Pass 2 start")
         context.window.scene = self.export_scene
-        bpy.ops.object.select_all(action='DESELECT')
         bpy.ops.object.select_all(action='SELECT')
 
         context.view_layer.objects.active = context.selected_objects[0]
@@ -396,10 +395,23 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
         print(f"UV packing done")
         bpy.ops.object.mode_set(mode='OBJECT')
 
-        self.export_scene.td.units = '1'  # p/m units
-        self.export_scene.td.texture_size = '3'  # 4096x4096 texture size
-        bpy.ops.object.texel_density_check()
-        uv_multiplier = 256.0 / float(self.export_scene.td.density)
+        # calculate approx. texel density from a random object
+        td_target = context.visible_objects[random.randint(0, len(context.visible_objects))]
+        uv_area = np.zeros(len(td_target.data.polygons), dtype=float)
+        for polygon in td_target.data.polygons:
+            loops = polygon.loop_indices
+            if len(loops) > 4:
+                continue
+            else:
+                uv_verts = [td_target.data.uv_layers.active.uv.data.uv[x].vector for x in loops]
+            face_uv_area = 0
+            face_uv_area += mathutils.geometry.area_tri(uv_verts[0], uv_verts[1], uv_verts[2])
+            if len(uv_verts) == 4:
+                face_uv_area += mathutils.geometry.area_tri(uv_verts[0], uv_verts[2], uv_verts[3])
+            uv_area[polygon.index] = sqrt(face_uv_area) / (sqrt(polygon.area) * 100) * 100
+        texel_density_approx = np.average(uv_area) * 4096
+
+        uv_multiplier = 256.0 / texel_density_approx
 
         # scale UVs and find V max to determine base offset for instances
         print("Start UV scaling")
@@ -413,8 +425,6 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
                 uv.data.foreach_get('uv', uv_temp)
                 scaled_uv = np.dot(uv_temp.reshape((-1, 2)) - center, S) + center
                 uv.data.foreach_set('uv', scaled_uv.ravel())
-                max_v = max(uv_temp[1::2].max() * uv_multiplier, max_v)
-        print(max_v)
 
         # PASS 3: export objects to UE/Houdini folders and write JSON
 
