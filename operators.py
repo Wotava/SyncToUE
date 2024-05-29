@@ -337,7 +337,9 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
             self.export_scene = bpy.data.scenes.new('ExportScene')
 
         # PASS 1: make copy of current scene with all objects without modifiers
-        for obj in context.visible_objects:
+        t_len = len(context.visible_objects)
+        print(f"Pass 1 start")
+        for i, obj in enumerate(context.visible_objects):
             if obj.type not in ['MESH', 'LIGHT']:
                 continue
 
@@ -358,9 +360,11 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
 
             if evaluated_obj.data and len(evaluated_obj.data.polygons) > 0:
                 self.duplicate_to_export(evaluated_obj)
+            print(f"Processed {(i+1)/t_len * 100:.2f}% of objects")
 
         # PASS 2: pack all geometry, set texel density
         # switch scene to export and context to uv-view/3d-view by the name 'UV Editing'
+        print(f"Pass 2 start")
         context.window.scene = self.export_scene
         bpy.ops.object.select_all(action='DESELECT')
         bpy.ops.object.select_all(action='SELECT')
@@ -383,12 +387,13 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
         bpy.ops.mesh.select_all(action='SELECT')
 
         # override context to UV editor, try unwrap
+        print(f"UV packing began")
         with bpy.context.temp_override(area=uv_area):
             bpy.ops.uv.select_all(action='SELECT')
 
             self.export_scene.uvpm3_props.normalize_scale = True
             bpy.ops.uvpackmaster3.pack(mode_id="pack.single_tile", pack_to_others=False)
-
+        print(f"UV packing done")
         bpy.ops.object.mode_set(mode='OBJECT')
 
         self.export_scene.td.units = '1'  # p/m units
@@ -397,7 +402,8 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
         uv_multiplier = 256.0 / float(self.export_scene.td.density)
 
         # scale UVs and find V max to determine base offset for instances
-        max_v = 0.0
+        print("Start UV scaling")
+        max_v = uv_multiplier
         center = (0.0, 0.0)
         S = Matrix.Diagonal((uv_multiplier, uv_multiplier))
         for obj in context.visible_objects:
@@ -415,6 +421,7 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
         # I can't get "fresh" mesh data blocks from here for some reason if I don't switch back and forth
         # between edit and object modes after making all objects single-user
         # So first I write JSON and make mesh data single user, then switch context mode and then offset UVs
+        print(f"Pass 3 start")
         for obj in bpy.context.visible_objects:
             object_array.append(self.make_dict(obj, obj.data.name))
 
@@ -425,11 +432,13 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
         bpy.ops.object.mode_set(mode='OBJECT')
         bpy.context.view_layer.update()
 
-        for obj in bpy.context.visible_objects:
+        print(f"Begin export")
+        t_len = len(self.hash_data)
+        for i, obj in enumerate(bpy.context.visible_objects):
             if obj.name.split('_')[-1] == '0':
                 # export as unique
                 self.export_fbx(obj, target='UE')
-                pass
+                print(f"Export progress: {(i + 1) / t_len * 100:.1f}% of unique objects exported")
             else:
                 target_uv = obj.data.uv_layers.get('UVMap')
                 if not target_uv:
@@ -442,7 +451,9 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
                 uv_temp[1::2] += offset
                 target_uv.data.foreach_set('uv', uv_temp)
 
+        print("Large scene export")
         self.export_fbx(None, target='Houdini')
+        print("Finish export")
 
         # PASS 4: fill and save internal and on-disk JSON files
         json_target.write("{\"array\":")
