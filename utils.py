@@ -56,6 +56,5 @@ class ExportParameters(bpy.types.PropertyGroup):
 
     def draw(self, layout):
         for prop in list(self.__annotations__):
-            if getattr(self, prop):
-                row = layout.row()
-                row.prop(self, prop)
+            row = layout.row()
+            row.prop(self, prop)
