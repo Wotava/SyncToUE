@@ -16,45 +16,8 @@ light_multiplier = 1.0
 
 table_justify = 40
 
-instancing_nodes = ["MG_Scatter", "MG_Array"]
-morph_nodes = ["MG_StairGenerator"]
-
-last_mode = 'OBJECT'
-
 target_uv_names = ['UVMap', 'UVAtlas', 'UV_SlopePreset', 'UVInset']
 bake_atlas_layer = target_uv_names[1]
-
-def snake_case(string: str) -> str:
-    return string.lower().replace(" ", "_")
-
-
-def get_node_group_input(modifier, input_display_name):
-    """Get a value by input display name"""
-    node_group = modifier.node_group
-    for field in node_group.inputs:
-        if field.name == input_display_name:
-            return modifier[field.identifier]
-    return None
-
-
-def get_modifier_pseudohash(mod) -> str:
-    values = ""
-    if mod.type == 'NODES':
-        for prop in mod.keys():
-            if prop.find('attribute') == -1:
-                values += str(mod.get(prop))
-    else:
-        properties = [p.identifier for p in list(mod.bl_rna.properties) if not p.is_readonly]
-        for prop in properties:
-            values += str(getattr(mod, prop))
-    return values
-
-
-def hash_modifier_stack(obj) -> int:
-    stack = ""
-    for mod in obj.modifiers:
-        stack += get_modifier_pseudohash(mod)
-    return hash(stack)
 
 
 class Report:
@@ -519,33 +482,4 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
         json_disk.write(json_target.as_string())
         json_disk.close()
 
-        return {'FINISHED'}
-
-
-def dump_context(context_base, filename):
-    context = context_base.copy()
-    text = bpy.data.texts.get(filename)
-    if not text:
-        text = bpy.data.texts.new(filename)
-    for key, value in zip(context.keys(), context.values()):
-        if hasattr(value, 'type'):
-            text.write(f"{key} -> {value} -> {value.type}\n")
-        else:
-            text.write(f"{key} -> {value}\n")
-    del context
-
-
-class SCENE_OP_TestContext(bpy.types.Operator):
-    """"""
-    bl_label = "Test Context"
-    bl_idname = "scene.test_context"
-    bl_options = {'REGISTER', 'UNDO'}
-
-    @classmethod
-    def poll(cls, context):
-        return True
-
-    def execute(self, context):
-        bpy.ops.uv.select_all(action='SELECT')
-        dump_context(context, 'UV')
         return {'FINISHED'}
