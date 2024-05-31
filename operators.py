@@ -9,6 +9,8 @@ import os
 from mathutils import Vector, Euler, Matrix
 from math import pi, sqrt
 
+from . utils import hash_geometry, get_world_transform, copy_transform
+
 import numpy as np
 
 unit_multiplier = 100.0
@@ -83,32 +85,6 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
         if context.workspace.name != 'UV Editing':
             cls.poll_message_set("Only works from default UV Editing workspace. Workspace should have exact name 'UV Editing' and contain UV area")
         return context.workspace.name == 'UV Editing'
-
-    def get_polygon_data(self, data) -> np.ndarray:
-        """Returns flat list of all face positions extended with face areas"""
-        centers = np.zeros(len(data.polygons) * 3, dtype=float)
-        areas = np.zeros(len(data.polygons), dtype=float)
-        data.polygons.foreach_get("center", centers)
-        data.polygons.foreach_get("area", areas)
-        return np.concatenate((centers, areas))
-
-    def hash_uv_maps(self, data):
-        """Hash UV coordinates of all UV maps and return list of hashes"""
-        if len(data.uv_layers) == 0:
-            return 0
-
-        hashes = []
-        container = np.zeros(len(data.uv_layers[0].uv.values()) * 2, dtype=float)
-        for uvmap in data.uv_layers:
-            uvmap.uv.foreach_get("vector", container)
-            hashes.append(hash(container.tobytes()))
-
-        return hashes
-
-    def hash_geometry(self, obj) -> int:
-        face_hash = self.get_polygon_data(obj.data).tobytes()
-        uv_hash = str(self.hash_uv_maps(obj.data))
-        return hash(tuple([face_hash, uv_hash]))
 
     # expects already "prepared" object on input
     def export_fbx(self, obj, target='UE'):
@@ -194,7 +170,7 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
         container["OBJ_NAME"] = name
         container["OBJ_TYPE"] = obj.type
 
-        loc, rot, scale = self.get_world_transform(obj)
+        loc, rot, scale = get_world_transform(obj)
         rot = list(rot[0:3])
 
         swizzle_rot = False
@@ -244,31 +220,8 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
 
         return container
 
-    def get_world_transform(self, obj):
-        world_matrix = obj.matrix_world
-
-        loc = world_matrix.to_translation()
-        rot = world_matrix.to_euler()
-        scale = world_matrix.to_scale()
-
-        scale_matrix = Matrix.Diagonal(scale)
-
-        for s in scale:
-            if s > 0:
-                continue
-        else:
-            rot = (rot.to_matrix() @ scale_matrix).to_euler()
-
-        return loc, rot, scale
-
-    def copy_transform(self, source, target) -> None:
-        s_loc, s_rot, s_scale = self.get_world_transform(source)
-        target.location = s_loc
-        target.scale = s_scale
-        target.rotation_euler = s_rot
-
     def duplicate_to_export(self, obj) -> None:
-        geo_hash = self.hash_geometry(obj)
+        geo_hash = hash_geometry(obj)
         if geo_hash not in self.hash_data:
             # make evaluated copy mesh data
             new_mesh = bpy.data.meshes.new_from_object(obj)
@@ -286,7 +239,7 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
         name = self.make_obj_name(new_mesh, count)
         new_obj = bpy.data.objects.new(name, new_mesh)
         new_obj['instance_count'] = count
-        self.copy_transform(obj, new_obj)
+        copy_transform(obj, new_obj)
 
         self.export_scene.collection.objects.link(new_obj)
         return
