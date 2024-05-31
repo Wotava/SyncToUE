@@ -326,6 +326,8 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
         self.hash_data.clear()
         object_array = []
 
+        target_td = context.scene.stu_parameters.target_density
+
         json_target = bpy.data.texts.get("JSON_base")
         if not json_target:
             json_target = bpy.data.texts.new("JSON_base")
@@ -467,14 +469,16 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
         bpy.context.view_layer.update()
 
         print(f"Begin export")
-        t_len = len(self.hash_data)
-        for i, obj in enumerate(bpy.context.visible_objects):
-            if obj.name.split('_')[-1] == '0':
+        t_len = len(self.hash_count)
+        i = 0
+        for obj in bpy.context.visible_objects:
+            if obj.name[-2:] == '_0':
                 # export as unique
                 self.export_fbx(obj, target='UE')
                 print(f"Export progress: {(i + 1) / t_len * 100:.1f}% of unique objects exported")
+                i += 1
             else:
-                target_uv = obj.data.uv_layers.get('UVMap')
+                target_uv = obj.data.uv_layers.get(self.target_UV)
                 if not target_uv:
                     self.report({'ERROR'}, "UVAtlas not found, this should NOT happen ever")
                     return {'CANCELLED'}
