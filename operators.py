@@ -152,6 +152,9 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
         if not obj and target == 'UE':
             raise Exception
 
+        if not self.write_meshes:
+            return
+
         export_path = bpy.context.scene.stu_parameters.export_path
         if len(export_path) == 0:
             filepath = bpy.data.filepath
@@ -174,10 +177,15 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
             dummy.location = Vector((0.0, 0.0, 0.0))
             dummy.rotation_euler = Euler((0.0, 0.0, 0.0), 'XYZ')
             dummy.scale = Vector((1.0, 1.0, 1.0))
+
+            export_scale = 'FBX_SCALE_NONE'
+            export_global_scale = 1.0
         else:
             bpy.ops.object.select_all(action='SELECT')
             export_path += '\\Houdini'
             name = bpy.path.basename(bpy.context.blend_data.filepath)
+            export_scale = 'FBX_SCALE_UNITS'
+            export_global_scale = 0.01
 
         is_exist = os.path.exists(export_path)
         if not is_exist:
@@ -195,8 +203,8 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
                                  axis_forward='X',
                                  axis_up='Z',
                                  apply_unit_scale=True,
-                                 apply_scale_options='FBX_SCALE_NONE',
-                                 global_scale=1.0,
+                                 apply_scale_options=export_scale,
+                                 global_scale=export_global_scale,
                                  use_triangles=False
                                  )
 
