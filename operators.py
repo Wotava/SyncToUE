@@ -21,7 +21,8 @@ morph_nodes = ["MG_StairGenerator"]
 
 last_mode = 'OBJECT'
 
-UV_Layers = ['UVMap', 'UVAtlas', 'UVPanelPreset', 'UVInset']
+target_uv_names = ['UVMap', 'UVAtlas', 'UV_SlopePreset', 'UVInset']
+bake_atlas_layer = target_uv_names[1]
 
 def snake_case(string: str) -> str:
     return string.lower().replace(" ", "_")
@@ -106,6 +107,8 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
     hash_count = {}
 
     export_scene = None
+
+    target_UV = target_uv_names[0]
 
     write_meshes: BoolProperty(
         name="Write Meshes",
@@ -385,6 +388,27 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
         bpy.ops.object.mode_set(mode='EDIT')
         bpy.ops.mesh.select_all(action='SELECT')
 
+        # Check if UVAtlas is available and ensure all UVs are in place
+        print("Ensure UV slots")
+        for obj in context.visible_objects:
+            if len(obj.data.uv_layers) > 0:
+                obj.data.uv_layers.active_index = 0
+
+            if len(obj.data.uv_layers) < 4:
+                for layer in target_uv_names[len(obj.data.uv_layers):]:
+                    obj.data.uv_layers.new().name = layer
+            else:
+                for i, name in enumerate(target_uv_names):
+                    obj.data.uv_layers[i].name = name
+
+            uv_temp = np.zeros(len(obj.data.uv_layers[0].uv.data.uv), dtype=float)
+
+            # refresh UVAtlas content
+            obj.data.uv_layers[0].uv.data.uv.foreach_get('uv', uv_temp)
+            obj.data.uv_layers[1].uv.data.uv.foreach_set('uv', uv_temp)
+            obj.data.uv_layers.active_index = 1
+            del uv_temp
+
         # override context to UV editor, try unwrap
         print(f"UV packing began")
         with bpy.context.temp_override(area=uv_area):
@@ -411,7 +435,7 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
             uv_area[polygon.index] = sqrt(face_uv_area) / (sqrt(polygon.area) * 100) * 100
         texel_density_approx = np.average(uv_area) * 4096
 
-        uv_multiplier = 256.0 / texel_density_approx
+        uv_multiplier = target_td / texel_density_approx
 
         # scale UVs and find V max to determine base offset for instances
         print("Start UV scaling")
@@ -420,7 +444,7 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
         S = Matrix.Diagonal((uv_multiplier, uv_multiplier))
         for obj in context.visible_objects:
             if obj.name[-2:] == '_0':
-                uv = obj.data.uv_layers['UVMap']
+                uv = obj.data.uv_layers[self.target_UV]
                 uv_temp = np.zeros(len(uv.data) * 2, dtype=float)
                 uv.data.foreach_get('uv', uv_temp)
                 scaled_uv = np.dot(uv_temp.reshape((-1, 2)) - center, S) + center
