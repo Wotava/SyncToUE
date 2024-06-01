@@ -390,21 +390,38 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
         print(f"UV packing done")
         bpy.ops.object.mode_set(mode='OBJECT')
 
-        # calculate approx. texel density from a random object
-        td_target = context.visible_objects[random.randint(0, len(context.visible_objects) - 1)]
-        uv_area = np.zeros(len(td_target.data.polygons), dtype=float)
-        for polygon in td_target.data.polygons:
-            loops = polygon.loop_indices
-            if len(loops) > 4:
+        # calculate approx. texel density from a number of random objects
+        i = 0
+        max_samples = 10
+        td_averages = np.zeros(max_samples, dtype=float)
+
+        for obj in context.visible_objects:
+            if len(obj.data.uv_layers) == 0:
                 continue
-            else:
-                uv_verts = [td_target.data.uv_layers.active.uv.data.uv[x].vector for x in loops]
-            face_uv_area = 0
-            face_uv_area += mathutils.geometry.area_tri(uv_verts[0], uv_verts[1], uv_verts[2])
-            if len(uv_verts) == 4:
-                face_uv_area += mathutils.geometry.area_tri(uv_verts[0], uv_verts[2], uv_verts[3])
-            uv_area[polygon.index] = sqrt(face_uv_area) / (sqrt(polygon.area) * 100) * 100
-        texel_density_approx = np.average(uv_area) * 4096
+
+            uv_area = np.zeros(len(obj.data.polygons), dtype=float)
+            for polygon in obj.data.polygons:
+                loops = polygon.loop_indices
+                if len(loops) > 4:
+                    continue
+                else:
+                    uv_verts = [obj.data.uv_layers.active.uv.data.uv[x].vector for x in loops]
+                face_uv_area = 0
+                face_uv_area += mathutils.geometry.area_tri(uv_verts[0], uv_verts[1], uv_verts[2])
+                if len(uv_verts) == 4:
+                    face_uv_area += mathutils.geometry.area_tri(uv_verts[0], uv_verts[2], uv_verts[3])
+                uv_area[polygon.index] = sqrt(face_uv_area) / (sqrt(polygon.area) * 100) * 100
+
+            td_averages[i] = np.average(uv_area) * 4096
+            i += 1
+            if i == max_samples:
+                break
+
+        if len(td_averages.nonzero()) != 0 and np.average(td_averages[td_averages.nonzero()]) > 0:
+            texel_density_approx = np.average(td_averages[td_averages.nonzero()])
+        else:
+            self.report({'ERROR'}, "Failed to calculate texel density")
+            return {'CANCELLED'}
 
         uv_multiplier = target_td / texel_density_approx
 
