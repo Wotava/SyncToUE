@@ -113,3 +113,49 @@ def copy_transform(source, target) -> None:
     target.location = s_loc
     target.scale = s_scale
     target.rotation_euler = s_rot
+
+
+def vector_angle(v1, v2, normalized):
+    if v1 == v2:
+        return 0
+
+    if not normalized:
+        v1_u = v1 / np.linalg.norm(v1)
+        v2_u = v2 / np.linalg.norm(v2)
+        return np.degrees(np.arccos(np.clip(np.dot(v1_u, v2_u), -1.0, 1.0)))
+    else:
+        return np.degrees(np.arccos(np.clip(np.dot(v1, v2), -1.0, 1.0)))
+
+
+def select_smooth_faces(obj, slope_epsilon=1):
+    mesh = obj.data
+
+    if mesh.normals_domain == 'FACE':        # face normal domain means mesh is flat shaded
+        return
+    elif mesh.normals_domain == 'POINT':     # point  normal domain means mesh is entirely smooth shaded
+        mesh.polygons.foreach_set('select',
+                                  np.ones(len(mesh.polygons), dtype=bool))
+        return
+    else:
+        # Since normals are stored in face-corner domain in every polygon loop,
+        # check every loop of a polygon against the first loop's normal,
+        # and if the angle between them is >0deg - set-select them to utilize
+        # "Select Similar -> delimit UV" operator to mark the entire island without using bmesh
+
+        # reset selection
+        mesh.polygons.foreach_set('select',
+                                  np.zeros(len(mesh.polygons), dtype=bool))
+        mesh.edges.foreach_set('select',
+                               np.zeros(len(mesh.edges), dtype=bool))
+        mesh.vertices.foreach_set('select',
+                                  np.zeros(len(mesh.vertices), dtype=bool))
+
+        # select a
+        for poly in mesh.polygons:
+            ref_normal = mesh.loops[poly.loop_indices[0]].normal
+
+            for index in poly.loop_indices:
+                if vector_angle(mesh.loops[index].normal, ref_normal, True) > (0 + slope_epsilon):
+                    mesh.polygons[poly.index].select = True
+                    break
+    return

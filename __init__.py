@@ -1,21 +1,22 @@
 if "bpy" in locals():
     import importlib
+    importlib.reload(utils)
     importlib.reload(operators)
     importlib.reload(ui)
-    importlib.reload(utils)
+
 else:
     import bpy
+    from . import utils
     from . import operators
     from . import ui
-    from . import utils
 
 bl_info = {
     'name': 'Sync to UE',
     'description': 'Simple helper addon to sync scene in UE with Blender',
     'location': '3D View -> Toolbox',
     'author': 'wotava',
-    'version': (1, 0),
-    'blender': (3, 0, 0),
+    'version': (1, 1),
+    'blender': (4, 1, 0),
     'category': 'Object'
 }
 classes = [

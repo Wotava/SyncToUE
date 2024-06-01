@@ -9,7 +9,7 @@ import os
 from mathutils import Vector, Euler, Matrix
 from math import pi, sqrt
 
-from . utils import hash_geometry, get_world_transform, copy_transform
+from . utils import hash_geometry, get_world_transform, copy_transform, select_smooth_faces
 
 import numpy as np
 
@@ -19,6 +19,9 @@ light_multiplier = 1.0
 table_justify = 40
 
 target_uv_names = ['UVMap', 'UVAtlas', 'UV_SlopePreset', 'UVInset']
+panel_preset_attribute = 'panel_preset_index'
+inset_uv_layer = target_uv_names[3]
+slope_uv_layer = target_uv_names[2]
 bake_atlas_layer = target_uv_names[1]
 
 
@@ -72,8 +75,6 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
     hash_count = {}
 
     export_scene = None
-
-    target_UV = target_uv_names[0]
 
     write_meshes: BoolProperty(
         name="Write Meshes",
@@ -311,29 +312,73 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
             self.report({'ERROR'}, "Failed to find UV area, reset workspace")
             return {'CANCELLED'}
 
-        bpy.ops.object.mode_set(mode='EDIT')
-        bpy.ops.mesh.select_all(action='SELECT')
-
-        # Check if UVAtlas is available and ensure all UVs are in place
-        print("Ensure UV slots")
+        # Write all important data to UV channels
+        # Start with selecting smooth faces
         for obj in context.visible_objects:
+            select_smooth_faces(obj, 1)
+
+        # TODO switch to bmesh here
+        bpy.ops.object.mode_set(mode='EDIT')
+        bpy.ops.mesh.select_linked(delimit={'UV'})
+        bpy.ops.object.mode_set(mode='OBJECT')
+
+        print("Convert data to UV slots")
+        for obj in context.visible_objects:
+            uv_temp = np.zeros(len(obj.data.uv_layers[0].uv) * 2, dtype=float)
+
             if len(obj.data.uv_layers) > 0:
                 obj.data.uv_layers.active_index = 0
+
+            has_inset = obj.data.uv_layers.get(inset_uv_layer) is not None
+            if has_inset:
+                obj.data.uv_layers.get(inset_uv_layer).data.foreach_get('uv', uv_temp)
 
             if len(obj.data.uv_layers) < 4:
                 for layer in target_uv_names[len(obj.data.uv_layers):]:
                     obj.data.uv_layers.new().name = layer
-            else:
-                for i, name in enumerate(target_uv_names):
-                    obj.data.uv_layers[i].name = name
 
-            uv_temp = np.zeros(len(obj.data.uv_layers[0].uv.data.uv), dtype=float)
+            for i, name in enumerate(target_uv_names):
+                obj.data.uv_layers[i].name = name
+
+            # restore inset if it was present
+            if has_inset:
+                obj.data.uv_layers.get(inset_uv_layer).data.foreach_set('uv', uv_temp)
 
             # refresh UVAtlas content
-            obj.data.uv_layers[0].uv.data.uv.foreach_get('uv', uv_temp)
-            obj.data.uv_layers[1].uv.data.uv.foreach_set('uv', uv_temp)
+            obj.data.uv_layers[0].data.foreach_get('uv', uv_temp)
+            obj.data.uv_layers[1].data.foreach_set('uv', uv_temp)
             obj.data.uv_layers.active_index = 1
+
+            # write slope from selection
+            preset_temp = np.zeros(len(obj.data.polygons), dtype=float)
+            slope_uv = obj.data.uv_layers[slope_uv_layer]
+
+            # get a list of selected
+            slope_loops = [[*x.loop_indices] for x in obj.data.polygons if x.select]
+            slope_loops = [y for x in slope_loops for y in x]  # extend a list of lists with nested comprehension
+
+            clean_loops = [[*x.loop_indices] for x in obj.data.polygons if not x.select]
+            clean_loops = [y for x in clean_loops for y in x]  # extend a list of lists with nested comprehension
+
+            for i in slope_loops:
+                uv_temp[i * 2] = -1
+
+            for i in clean_loops:
+                uv_temp[i * 2] = +1
+
+            if obj.data.attributes.get(panel_preset_attribute):
+                obj.data.attributes['panel_preset_index'].data.foreach_get('value', preset_temp)
+                for polygon in obj.data.polygons:
+                    preset_index = preset_temp[polygon.index]
+                    loops = polygon.loop_indices
+                    for loop in loops:
+                        uv_temp[(loop * 2) + 1] = preset_index
+
+            slope_uv.data.foreach_set("uv", uv_temp)
             del uv_temp
+
+        bpy.ops.object.mode_set(mode='EDIT')
+        bpy.ops.mesh.select_all(action='SELECT')
 
         # override context to UV editor, try unwrap
         print(f"UV packing began")
@@ -346,7 +391,7 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
         bpy.ops.object.mode_set(mode='OBJECT')
 
         # calculate approx. texel density from a random object
-        td_target = context.visible_objects[random.randint(0, len(context.visible_objects))]
+        td_target = context.visible_objects[random.randint(0, len(context.visible_objects) - 1)]
         uv_area = np.zeros(len(td_target.data.polygons), dtype=float)
         for polygon in td_target.data.polygons:
             loops = polygon.loop_indices
@@ -370,7 +415,7 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
         S = Matrix.Diagonal((uv_multiplier, uv_multiplier))
         for obj in context.visible_objects:
             if obj.name[-2:] == '_0':
-                uv = obj.data.uv_layers[self.target_UV]
+                uv = obj.data.uv_layers.get(bake_atlas_layer)
                 uv_temp = np.zeros(len(uv.data) * 2, dtype=float)
                 uv.data.foreach_get('uv', uv_temp)
                 scaled_uv = np.dot(uv_temp.reshape((-1, 2)) - center, S) + center
@@ -402,7 +447,7 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
                 print(f"Export progress: {(i + 1) / t_len * 100:.1f}% of unique objects exported")
                 i += 1
             else:
-                target_uv = obj.data.uv_layers.get(self.target_UV)
+                target_uv = obj.data.uv_layers.get(bake_atlas_layer)
                 if not target_uv:
                     self.report({'ERROR'}, "UVAtlas not found, this should NOT happen ever")
                     return {'CANCELLED'}
@@ -427,7 +472,6 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
             filepath = bpy.data.filepath
             directory = os.path.dirname(filepath)
             json_disk = open(directory + "\\level_data.json", "a")
-            self.report({'INFO'}, "JSON was exported in .blend directory")
         else:
             json_disk = open(bpy.path.abspath(json_path), "a")
 
@@ -435,4 +479,5 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
         json_disk.write(json_target.as_string())
         json_disk.close()
 
+        self.report({'INFO'}, "Finished as expected. UNDO now to return to previous state")
         return {'FINISHED'}
