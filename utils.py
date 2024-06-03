@@ -52,7 +52,34 @@ class ExportParameters(bpy.types.PropertyGroup):
     target_density: FloatProperty(
         name="Target Density",
         description="In p/m on 4k texture",
-        default=256.0
+        default=16
+    )
+    target_resolution: FloatProperty(
+        name="Target Resolution",
+        description="Target image texture resolution",
+        default=1024
+    )
+    bake_ue: BoolProperty(
+        name="Output UE fbx",
+        default=False
+    )
+    bake_houdini: BoolProperty(
+        name="Output Houdini fbx",
+        default=False
+    )
+    internal_padding: FloatProperty(
+        name="Extra Padding",
+        description="Extra padding between instances",
+        soft_min=0,
+        soft_max=1,
+        default=0.001
+    )
+    accepted_td_loss: FloatProperty(
+        name="TD Loss MAX",
+        description="Maximum loss of target TD when squeezing udims",
+        min=0,
+        max=1,
+        default=0
     )
 
     def draw(self, layout):

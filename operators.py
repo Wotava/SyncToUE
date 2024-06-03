@@ -7,7 +7,7 @@ from bpy.props import BoolProperty, IntProperty
 import json
 import os
 from mathutils import Vector, Euler, Matrix
-from math import pi, sqrt
+from math import pi, sqrt, ceil
 
 from . utils import hash_geometry, get_world_transform, copy_transform, select_smooth_faces
 
@@ -89,6 +89,11 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
 
     # expects already "prepared" object on input
     def export_fbx(self, obj, target='UE'):
+        if target == 'UE' and not self.stu_params.bake_ue:
+            return
+        elif target != 'UE' and not self.stu_params.bake_houdini:
+            return
+
         if not obj and target == 'UE':
             raise Exception
 
@@ -125,7 +130,7 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
             export_path += '\\Houdini'
             name = bpy.path.basename(bpy.context.blend_data.filepath)
             export_scale = 'FBX_SCALE_UNITS'
-            export_global_scale = 0.01
+            export_global_scale = 1
 
         is_exist = os.path.exists(export_path)
         if not is_exist:
@@ -251,7 +256,9 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
         self.hash_data.clear()
         object_array = []
 
-        target_td = context.scene.stu_parameters.target_density
+        self.stu_params = context.scene.stu_parameters
+        target_td = self.stu_params.target_density
+        target_resolution = self.stu_params.target_resolution
 
         json_target = bpy.data.texts.get("JSON_base")
         if not json_target:
@@ -386,11 +393,17 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
             bpy.ops.uv.select_all(action='SELECT')
 
             self.export_scene.uvpm3_props.normalize_scale = True
+            self.export_scene.uvpm3_props.margin = 0.006
+            # self.export_scene.uvpm3_props.pixel_margin_enable = True
+            # self.export_scene.uvpm3_props.pixel_margin_tex_size = int(self.stu_params.target_resolution)
+            # self.export_scene.uvpm3_props.pixel_margin = 1
+
             bpy.ops.uvpackmaster3.pack(mode_id="pack.single_tile", pack_to_others=False)
         print(f"UV packing done")
         bpy.ops.object.mode_set(mode='OBJECT')
 
         # calculate approx. texel density from a number of random objects
+        print("Start TD calculation")
         i = 0
         max_samples = 10
         td_averages = np.zeros(max_samples, dtype=float)
@@ -412,7 +425,7 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
                     face_uv_area += mathutils.geometry.area_tri(uv_verts[0], uv_verts[2], uv_verts[3])
                 uv_area[polygon.index] = sqrt(face_uv_area) / (sqrt(polygon.area) * 100) * 100
 
-            td_averages[i] = np.average(uv_area) * 4096
+            td_averages[i] = np.average(uv_area) * target_resolution
             i += 1
             if i == max_samples:
                 break
@@ -426,10 +439,39 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
         uv_multiplier = target_td / texel_density_approx
 
         # scale UVs and find V max to determine base offset for instances
+        print("Calculate max UV values")
+        max_v = 0
+        max_u = 0
+        for obj in context.visible_objects:
+            uv_temp = np.zeros(len(obj.data.uv_layers[bake_atlas_layer].data) * 2, dtype=float)
+            obj.data.uv_layers[bake_atlas_layer].data.foreach_get('uv', uv_temp)
+            max_v = max(max_v, np.max(uv_temp[1::2]))
+            max_u = max(max_u, np.max(uv_temp[::2]))
+
+        max_v *= uv_multiplier
+        max_u *= uv_multiplier
+
+        max_u += self.stu_params.internal_padding
+        max_v += self.stu_params.internal_padding
+
+        # squeeze more instances in one UDIM
+        squeezed_v_mult = 1 / ceil(1 / max_v) / max_v
+        squeezed_u_mult = 1 / ceil(1 / max_u) / max_u
+
+        global_multiplier = uv_multiplier
+        global_multiplier *= min(squeezed_u_mult, squeezed_v_mult)
+
+        max_u = max_u / uv_multiplier * global_multiplier
+        max_v = max_v / uv_multiplier * global_multiplier
+
+        print(f"Requested TD {target_td}, actual TD {target_td / uv_multiplier * global_multiplier}")
+        # calc amount of horizontal udims
+        horizontal_udims = int(1 / max_u)
+        print(f"Horizontal UDIMs: {horizontal_udims}")
+
         print("Start UV scaling")
-        max_v = uv_multiplier
         center = (0.0, 0.0)
-        S = Matrix.Diagonal((uv_multiplier, uv_multiplier))
+        S = Matrix.Diagonal((global_multiplier, global_multiplier))
         for obj in context.visible_objects:
             if obj.name[-2:] == '_0':
                 uv = obj.data.uv_layers.get(bake_atlas_layer)
@@ -469,13 +511,24 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
                     self.report({'ERROR'}, "UVAtlas not found, this should NOT happen ever")
                     return {'CANCELLED'}
 
-                offset = max_v * (int(obj.name.split('_')[-1]))
+                v_offset = max_v * ((int(obj.name.split('_')[-1])) // horizontal_udims)
+                u_offset = max_u * ((int(obj.name.split('_')[-1])) % horizontal_udims)
+
                 uv_temp = np.zeros(len(target_uv.data) * 2, dtype=float)
                 target_uv.data.foreach_get('uv', uv_temp)
-                uv_temp[1::2] += offset
+                uv_temp[1::2] += v_offset
+                uv_temp[::2] += u_offset
                 target_uv.data.foreach_set('uv', uv_temp)
 
         print("Large scene export")
+        for obj in context.visible_objects:
+            if obj.scale.x < 0 or obj.scale.y < 0 or obj.scale.z < 0:
+                # obj.data = obj.data.copy()
+                mat = obj.matrix_local
+                mat_scale = Matrix.LocRotScale(None, None, mat.decompose()[2])
+                obj.data.transform(mat_scale)
+                obj.scale = 1, 1, 1
+                obj.data.flip_normals()
         self.export_fbx(None, target='Houdini')
         print("Finish export")
 
