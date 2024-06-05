@@ -2,14 +2,14 @@ import random
 
 import bpy
 import mathutils
-from bpy.props import BoolProperty, IntProperty
+from bpy.props import BoolProperty, FloatProperty
 
 import json
 import os
 from mathutils import Vector, Euler, Matrix
 from math import pi, sqrt, ceil
 
-from . utils import hash_geometry, get_world_transform, copy_transform, select_smooth_faces
+from .utils import hash_geometry, get_world_transform, copy_transform, select_smooth_faces
 
 import numpy as np
 import bmesh
@@ -85,7 +85,8 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
     @classmethod
     def poll(cls, context):
         if context.workspace.name != 'UV Editing':
-            cls.poll_message_set("Only works from default UV Editing workspace. Workspace should have exact name 'UV Editing' and contain UV area")
+            cls.poll_message_set(
+                "Only works from default UV Editing workspace. Workspace should have exact name 'UV Editing' and contain UV area")
         return context.workspace.name == 'UV Editing'
 
     # expects already "prepared" object on input
@@ -298,7 +299,7 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
 
             if evaluated_obj.data and len(evaluated_obj.data.polygons) > 0:
                 self.duplicate_to_export(evaluated_obj)
-            print(f"Processed {(i+1)/t_len * 100:.2f}% of objects")
+            print(f"Processed {(i + 1) / t_len * 100:.2f}% of objects")
 
         # PASS 2: pack all geometry, set texel density
         # switch scene to export and context to uv-view/3d-view by the name 'UV Editing'
@@ -586,6 +587,131 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
         json_disk.close()
 
         self.report({'INFO'}, "Finished as expected. UNDO now to return to previous state")
+        return {'FINISHED'}
+
+
+class SCENE_OP_ValidateUVs(bpy.types.Operator):
+    """Check all UVs and print report"""
+    bl_label = "Validate UVs"
+    bl_idname = "scene.validate_uvs"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    hashes = {}
+    reported = []
+
+    tolerance: FloatProperty(
+        name="Zero-area tolerance",
+        default=0.001
+    )
+
+    max_allowed_zeros: FloatProperty(
+        name="Max allowed",
+        description="Maximum percent of zero-area UV faces allowed",
+        default=10.0
+    )
+
+    @classmethod
+    def poll(cls, context):
+        return True
+
+    def check_uv(self, obj) -> int:
+        if obj.type != 'MESH' or not obj.data:
+            return -1
+
+        # calc hash
+        container = np.zeros(len(obj.data.uv_layers[0].uv.values()) * 2, dtype=float)
+        obj.data.uv_layers[0].uv.foreach_get("vector", container)
+        hashed_uv = hash(container.tobytes())
+        if hashed_uv in self.hashes:
+            return self.hashes.get(hashed_uv)
+
+        me = obj.data
+        bm = bmesh.new()
+        bm.from_mesh(me)
+
+        uv_layer = bm.loops.layers.uv.verify()
+        uv_areas = np.zeros(len(obj.data.polygons), dtype=float)
+
+        for face in bm.faces:
+            uv_verts = [loop[uv_layer].uv for loop in face.loops]
+            face_uv_area = mathutils.geometry.area_tri(uv_verts[0], uv_verts[1], uv_verts[2])
+            if len(uv_verts) == 4:
+                face_uv_area += mathutils.geometry.area_tri(uv_verts[0], uv_verts[2], uv_verts[3])
+            uv_areas[face.index] = sqrt(face_uv_area) / (sqrt(face.calc_area()) * 100) * 100
+
+        bm.to_mesh(me)
+        bm.free()
+
+        zero_faces = len(uv_areas) - len(np.where(uv_areas > 0 + self.tolerance)[0])
+
+        self.hashes.update({hashed_uv: zero_faces})
+
+        return zero_faces
+
+    def execute(self, context):
+        self.hashes.clear()
+
+        if bpy.data.scenes.get('UV_Cleanup'):
+            cleanup_scene = bpy.data.scenes.get('UV_Cleanup')
+            unlink = list(cleanup_scene.collection.objects)
+            for obj in unlink:
+                cleanup_scene.collection.objects.unlink(obj)
+        else:
+            cleanup_scene = bpy.data.scenes.new('UV_Cleanup')
+
+        depsgraph = context.evaluated_depsgraph_get()
+
+        report_target = bpy.data.texts.get("UV_Report")
+        if not report_target:
+            report_target = bpy.data.texts.new("UV_Report")
+        else:
+            report_target.clear()
+
+        for obj in context.visible_objects:
+            has_header = False
+            if obj.type not in ['MESH']:
+                continue
+
+            evaluated_obj = obj.evaluated_get(depsgraph)
+
+            for inst in depsgraph.object_instances:
+                if inst.is_instance and inst.parent == evaluated_obj:
+                    if inst.object.type == 'MESH' and inst.object.data and len(inst.object.data.uv_layers):
+                        zero_area_faces = self.check_uv(inst.object)
+                        percentile = zero_area_faces / len(inst.object.data.polygons) / 0.01
+                        if percentile > self.max_allowed_zeros and inst.object.data.name not in self.reported:
+                            if not has_header:
+                                report_target.write(f"\n{obj.name} instances: \n")
+                                has_header = True
+
+                            report_target.write(f">>{inst.object.name}({inst.object.data.name}) has "
+                                                f"{percentile:.2f}% zero-area faces in UV \n")
+                            for mod in inst.object.modifiers:
+                                if mod.type == 'SOLIDIFY':
+                                    report_target.write(f"  Possibly due to solidify modifier, can be ignored\n")
+                                    break
+
+                            cleanup_scene.collection.objects.link(bpy.data.objects[inst.object.name])
+                            self.reported.append(inst.object.data.name)
+
+            if evaluated_obj.data and len(evaluated_obj.data.polygons) > 0:
+                zero_area_faces = self.check_uv(evaluated_obj)
+                percentile = zero_area_faces / len(evaluated_obj.data.polygons) / 0.01
+                if percentile > self.max_allowed_zeros and obj.data.name not in self.reported:
+                    if not has_header:
+                        report_target.write(f"\n{obj.name} instances: \n")
+
+                    report_target.write(f">>{evaluated_obj.name}({evaluated_obj.data.name}) evaluated has "
+                                        f"{percentile:.2f}% zero-faces in UV \n")
+                    for mod in evaluated_obj.modifiers:
+                        if mod.type == 'SOLIDIFY':
+                            report_target.write(f"  Possibly due to solidify modifier, can be ignored\n")
+                            break
+
+                    cleanup_scene.collection.objects.link(bpy.data.objects[evaluated_obj.name])
+                    self.reported.append(obj.data.name)
+
+        context.window.scene = cleanup_scene
         return {'FINISHED'}
 
 

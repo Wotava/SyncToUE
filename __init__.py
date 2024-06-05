@@ -23,6 +23,7 @@ classes = [
     operators.SCENE_OP_DumpToJSON,
     operators.SCENE_OP_AddAtlasMaterialSlot,
     operators.SCENE_OP_RemoveAtlasMaterialSlot,
+    operators.SCENE_OP_ValidateUVs,
     ui.VIEW3D_PT_ModifierManager,
     ui.DATA_UL_AtlasMaterials,
     utils.AtlasMatSlot,
