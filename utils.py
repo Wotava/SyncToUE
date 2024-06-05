@@ -1,7 +1,15 @@
 import bpy
-from bpy.props import FloatVectorProperty, BoolVectorProperty, BoolProperty, StringProperty, FloatProperty
+from bpy.props import *
 from mathutils import Matrix
 import numpy as np
+
+
+class AtlasMatSlot(bpy.types.PropertyGroup):
+    material: PointerProperty(
+        type=bpy.types.Material,
+        name="Material"
+    )
+
 
 class ExportParameters(bpy.types.PropertyGroup):
     flip_loc: BoolVectorProperty(
@@ -82,10 +90,54 @@ class ExportParameters(bpy.types.PropertyGroup):
         default=0
     )
 
+    active_material_index: IntProperty(
+        name="Active Mat Slot",
+        default=-1
+    )
+    materials: CollectionProperty(
+        type=AtlasMatSlot,
+        name="Atlas-baked Materials"
+    )
+
+    def add_material_slot(self):
+        self.materials.add()
+        self.active_material_index = len(self.materials) - 1
+
+    def remove_material_slot(self):
+        self.materials.remove(self.active_material_index)
+        self.active_material_index -= 1
+
+    def __contains__(self, item):
+        for mat_slot in self.materials:
+            if mat_slot.material.name == item:
+                return True
+        return False
+
+    def check_obj(self, obj) -> bool:
+        materials = [slot.material.name for slot in obj.material_slots if slot.material is not None]
+        for material in materials:
+            if material not in self:
+                return False
+        return True
+
     def draw(self, layout):
         for prop in list(self.__annotations__):
             row = layout.row()
-            row.prop(self, prop)
+            if prop not in ['materials', 'active_material_index']:
+                row.prop(self, prop)
+
+        box = layout.box()
+        box.label(text='Atlas Materials', icon='MATERIAL')
+        row = box.row()
+        row.template_list("DATA_UL_AtlasMaterials", "", self, "materials", self, "active_material_index", rows=3)
+
+        row = box.row()
+        row.operator("scene.add_atlas_material_slot", text="+")
+        row.operator("scene.remove_atlas_material_slot", text="-")
+
+        if len(self.materials) > 0:
+            row = box.row()
+            row.template_ID(self.materials[self.active_material_index], "material", new="material.new")
 
 
 def get_polygon_data(data) -> np.ndarray:

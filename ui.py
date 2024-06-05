@@ -1,5 +1,21 @@
 import bpy
 
+
+class DATA_UL_AtlasMaterials(bpy.types.UIList):
+    def draw_item(self, context, layout, data, item, icon, active_data, active_propname, index):
+        slot = item
+        mat = slot.material
+        row = layout.row()
+        col = row.column(align=True)
+
+        if mat is not None:
+            col.prop(slot.material, "name", text="", emboss=False, icon='MATERIAL')
+        else:
+            col.label(text="EMPTY SLOT", icon='QUESTION')
+        return
+
+
+
 class VIEW3D_PT_ModifierManager(bpy.types.Panel):
     bl_label = "Sync to UE"
     bl_space_type = 'VIEW_3D'

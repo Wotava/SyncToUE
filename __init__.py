@@ -21,7 +21,11 @@ bl_info = {
 }
 classes = [
     operators.SCENE_OP_DumpToJSON,
+    operators.SCENE_OP_AddAtlasMaterialSlot,
+    operators.SCENE_OP_RemoveAtlasMaterialSlot,
     ui.VIEW3D_PT_ModifierManager,
+    ui.DATA_UL_AtlasMaterials,
+    utils.AtlasMatSlot,
     utils.ExportParameters,
 ]
 

@@ -12,6 +12,7 @@ from math import pi, sqrt, ceil
 from . utils import hash_geometry, get_world_transform, copy_transform, select_smooth_faces
 
 import numpy as np
+import bmesh
 
 unit_multiplier = 100.0
 light_multiplier = 1.0
@@ -384,19 +385,36 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
             slope_uv.data.foreach_set("uv", uv_temp)
             del uv_temp
 
-        bpy.ops.object.mode_set(mode='EDIT')
-        bpy.ops.mesh.select_all(action='SELECT')
+        # Deselect all un-important UVs by material (only building materials matter)
+        # and calculate TD approx in the meantime
+        print("Deselecting non-Atlas UV islands")
+        for obj in context.visible_objects:
+            me = obj.data
+            bm = bmesh.new()
+            bm.from_mesh(me)
+
+            uv_layer = bm.loops.layers.uv.verify()
+
+            for face in bm.faces:
+                is_relevant = obj.material_slots[face.material_index].name in self.stu_params
+                for loop in face.loops:
+                    loop_uv = loop[uv_layer]
+                    if is_relevant:
+                        loop_uv.select = True
+                        loop.vert.select_set(True)
+                    else:
+                        loop_uv.select = False
+                        loop.vert.select_set(False)
+                        loop_uv.uv = Vector((-1, -1))
+            bm.to_mesh(me)
+            bm.free()
 
         # override context to UV editor, try unwrap
         print(f"UV packing began")
+        bpy.ops.object.mode_set(mode='EDIT')
         with bpy.context.temp_override(area=uv_area):
-            bpy.ops.uv.select_all(action='SELECT')
-
             self.export_scene.uvpm3_props.normalize_scale = True
             self.export_scene.uvpm3_props.margin = 0.006
-            # self.export_scene.uvpm3_props.pixel_margin_enable = True
-            # self.export_scene.uvpm3_props.pixel_margin_tex_size = int(self.stu_params.target_resolution)
-            # self.export_scene.uvpm3_props.pixel_margin = 1
 
             bpy.ops.uvpackmaster3.pack(mode_id="pack.single_tile", pack_to_others=False)
         print(f"UV packing done")
@@ -409,27 +427,32 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
         td_averages = np.zeros(max_samples, dtype=float)
 
         for obj in context.visible_objects:
-            if len(obj.data.uv_layers) == 0:
-                continue
+            me = obj.data
+            bm = bmesh.new()
+            bm.from_mesh(me)
 
-            uv_area = np.zeros(len(obj.data.polygons), dtype=float)
-            for polygon in obj.data.polygons:
-                loops = polygon.loop_indices
-                if len(loops) > 4:
-                    continue
-                else:
-                    uv_verts = [obj.data.uv_layers.active.uv.data.uv[x].vector for x in loops]
-                face_uv_area = 0
-                face_uv_area += mathutils.geometry.area_tri(uv_verts[0], uv_verts[1], uv_verts[2])
-                if len(uv_verts) == 4:
-                    face_uv_area += mathutils.geometry.area_tri(uv_verts[0], uv_verts[2], uv_verts[3])
-                uv_area[polygon.index] = sqrt(face_uv_area) / (sqrt(polygon.area) * 100) * 100
+            uv_layer = bm.loops.layers.uv.verify()
+            uv_areas = np.zeros(len(obj.data.polygons), dtype=float)
 
-            td_averages[i] = np.average(uv_area) * target_resolution
-            i += 1
+            for face in bm.faces:
+                is_relevant = obj.material_slots[face.material_index].name in self.stu_params
+
+                if is_relevant:
+                    uv_verts = [loop[uv_layer].uv for loop in face.loops]
+                    face_uv_area = mathutils.geometry.area_tri(uv_verts[0], uv_verts[1], uv_verts[2])
+                    if len(uv_verts) == 4:
+                        face_uv_area += mathutils.geometry.area_tri(uv_verts[0], uv_verts[2], uv_verts[3])
+                    uv_areas[face.index] = sqrt(face_uv_area) / (sqrt(face.calc_area()) * 100) * 100
+
+            if len(np.nonzero(uv_areas)[0]) > 0:
+                td_averages[i] = np.average(uv_areas[np.nonzero(uv_areas)]) * target_resolution
+                i += 1
+
+            bm.to_mesh(me)
+            bm.free()
+
             if i == max_samples:
                 break
-
         if len(td_averages.nonzero()) != 0 and np.average(td_averages[td_averages.nonzero()]) > 0:
             texel_density_approx = np.average(td_averages[td_averages.nonzero()])
         else:
@@ -506,19 +529,32 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
                 print(f"Export progress: {(i + 1) / t_len * 100:.1f}% of unique objects exported")
                 i += 1
             else:
-                target_uv = obj.data.uv_layers.get(bake_atlas_layer)
-                if not target_uv:
-                    self.report({'ERROR'}, "UVAtlas not found, this should NOT happen ever")
-                    return {'CANCELLED'}
-
                 v_offset = max_v * ((int(obj.name.split('_')[-1])) // horizontal_udims)
                 u_offset = max_u * ((int(obj.name.split('_')[-1])) % horizontal_udims)
+                offset = Vector((u_offset, v_offset))
 
-                uv_temp = np.zeros(len(target_uv.data) * 2, dtype=float)
-                target_uv.data.foreach_get('uv', uv_temp)
-                uv_temp[1::2] += v_offset
-                uv_temp[::2] += u_offset
-                target_uv.data.foreach_set('uv', uv_temp)
+                if self.stu_params.check_obj(obj):
+                    target_uv = obj.data.uv_layers.get(bake_atlas_layer)
+                    uv_temp = np.zeros(len(target_uv.data) * 2, dtype=float)
+                    target_uv.data.foreach_get('uv', uv_temp)
+                    uv_temp[1::2] += v_offset
+                    uv_temp[::2] += u_offset
+                    target_uv.data.foreach_set('uv', uv_temp)
+                else:
+                    me = obj.data
+                    bm = bmesh.new()
+                    bm.from_mesh(me)
+                    uv_layer = bm.loops.layers.uv.verify()
+
+                    for face in bm.faces:
+                        is_relevant = obj.material_slots[face.material_index].name in self.stu_params
+                        for loop in face.loops:
+                            loop_uv = loop[uv_layer]
+                            if is_relevant:
+                                loop_uv.uv += offset
+
+                    bm.to_mesh(me)
+                    bm.free()
 
         print("Large scene export")
         for obj in context.visible_objects:
@@ -550,4 +586,35 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
         json_disk.close()
 
         self.report({'INFO'}, "Finished as expected. UNDO now to return to previous state")
+        return {'FINISHED'}
+
+
+class SCENE_OP_AddAtlasMaterialSlot(bpy.types.Operator):
+    """Add Material Slot to Atlas Materials List"""
+    bl_label = "Add Slot to Atlas Material List"
+    bl_idname = "scene.add_atlas_material_slot"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    @classmethod
+    def poll(cls, context):
+        return True
+
+    def execute(self, context):
+        context.scene.stu_parameters.add_material_slot()
+        return {'FINISHED'}
+
+
+class SCENE_OP_RemoveAtlasMaterialSlot(bpy.types.Operator):
+    """Remove Material Slot to Atlas Materials List"""
+    bl_label = "Remove Slot to Atlas Material List"
+    bl_idname = "scene.remove_atlas_material_slot"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    @classmethod
+    def poll(cls, context):
+        slots = len(context.scene.stu_parameters.materials)
+        return slots > 0 and (-1 < context.scene.stu_parameters.active_material_index < slots)
+
+    def execute(self, context):
+        context.scene.stu_parameters.remove_material_slot()
         return {'FINISHED'}
