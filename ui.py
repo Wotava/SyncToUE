@@ -38,3 +38,18 @@ class VIEW3D_PT_ModifierManager(bpy.types.Panel):
         op.write_meshes = False
 
         context.scene.stu_parameters.draw(layout)
+
+        box = layout.box()
+        row = box.row()
+        row.label(text="Asset Quickies")
+        row = box.row()
+        op = row.operator("object.match_data_name", icon='OBJECT_DATA', text="Data=Obj")
+        op.data_to_object = False
+        op = row.operator("object.match_data_name", icon='MESH_DATA', text="Obj=Data")
+        op.data_to_object = True
+
+        row = box.row()
+        op = row.operator("object.add_collection_name_prefix")
+
+        row = box.row()
+        op = row.operator("object.wrap_in_collection", text="Wrap in Collection")

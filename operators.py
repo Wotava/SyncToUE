@@ -744,3 +744,103 @@ class SCENE_OP_RemoveAtlasMaterialSlot(bpy.types.Operator):
     def execute(self, context):
         context.scene.stu_parameters.remove_material_slot()
         return {'FINISHED'}
+
+
+class OBJECT_OP_MatchDataNames(bpy.types.Operator):
+    """Match Data-block name with Object name (both ways)"""
+    bl_label = "Match Object/Data Names"
+    bl_idname = "object.match_data_name"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    data_to_object: BoolProperty(
+        name="Copy from OBJ to DATA",
+        default=False
+    )
+    only_meshes: BoolProperty(
+        name="Only Meshes",
+        default=False
+    )
+
+    @classmethod
+    def poll(cls, context):
+        return len(context.visible_objects)
+
+    def execute(self, context):
+        if len(context.selected_objects) > 0:
+            targets = context.selected_objects
+        else:
+            targets = context.visible_objects
+
+        for obj in targets:
+            if self.only_meshes and obj.type != 'MESH':
+                continue
+
+            if obj.data:
+                if self.data_to_object:
+                    obj.name = obj.data.name
+                else:
+                    obj.data.name = obj.name
+        return {'FINISHED'}
+
+
+class OBJECT_OP_AddCollectionNamePrefix(bpy.types.Operator):
+    """Add Collection name prefix to objects"""
+    bl_label = "Add Collection Prefix to Name"
+    bl_idname = "object.add_collection_name_prefix"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    @classmethod
+    def poll(cls, context):
+        return len(context.visible_objects)
+
+    def execute(self, context):
+        if len(context.selected_objects) > 0:
+            targets = context.selected_objects
+        else:
+            targets = context.visible_objects
+
+        for obj in targets:
+            obj.name = f"{obj.users_collection[0].name}_{obj.name}"
+
+        return {'FINISHED'}
+
+
+class OBJECT_OP_WrapInCollection(bpy.types.Operator):
+    """Wrap this object (or objects) in collection with the name of Active Object"""
+    bl_label = "Wrap in Collection with Same Name"
+    bl_idname = "object.wrap_in_collection"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    per_object: BoolProperty(
+        name="Wrap Individually",
+        default=False
+    )
+
+    @classmethod
+    def poll(cls, context):
+        return context.active_object
+
+    def execute(self, context):
+        if len(context.selected_objects) > 1:
+            targets = context.selected_objects
+        else:
+            targets = [context.active_object]
+
+        if self.per_object:
+            for obj in targets:
+                base_collection = obj.users_collection[0]
+                base_collection.objects.unlink(obj)
+                new_collection = bpy.data.collections.new(obj.name)
+                base_collection.children.link(new_collection)
+                new_collection.objects.link(obj)
+
+        else:
+            base_collection = context.active_object.users_collection[0]
+            new_collection = bpy.data.collections.new(context.active_object.name)
+            base_collection.children.link(new_collection)
+
+            for obj in targets:
+                base_collection.objects.unlink(obj)
+                new_collection.objects.link(obj)
+
+        return {'FINISHED'}
