@@ -6,6 +6,7 @@ from bpy.props import BoolProperty, FloatProperty
 
 import json
 import os
+from shutil import copyfile, copy
 from mathutils import Vector, Euler, Matrix
 from math import pi, sqrt, ceil
 
@@ -843,4 +844,93 @@ class OBJECT_OP_WrapInCollection(bpy.types.Operator):
                 base_collection.objects.unlink(obj)
                 new_collection.objects.link(obj)
 
+        return {'FINISHED'}
+
+
+class EXPORT_OP_ExportAssets(bpy.types.Operator):
+    """Export assets in this .blend"""
+    bl_label = "Export Assets to FBX"
+    bl_idname = "export_scene.assets"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    exported_materials = []
+    export_path = ""
+    
+    @classmethod
+    def poll(cls, context):
+        return True
+
+    def export_material(self, mat):
+        if mat in self.exported_materials:
+            return
+        else:
+            self.exported_materials.append(mat)
+
+        textures = []
+        if mat.node_tree:
+            for node in mat.node_tree.nodes:
+                if node.type == 'TEX_IMAGE':
+                    textures.append(node.image)
+
+        for texture in textures:
+            if texture.type == 'IMAGE' and texture.name[:2] == 'T_' and texture.filepath is not None:
+                source_file = bpy.path.abspath(texture.filepath)
+                copy(source_file, self.export_path)
+        return
+
+    def execute(self, context):
+        start_scene = context.scene
+
+        self.export_path = bpy.context.scene.stu_parameters.asset_export_path
+        if len(self.export_path) == 0:
+            filepath = bpy.data.filepath
+            self.export_path = os.path.dirname(filepath)
+        else:
+            self.export_path = bpy.path.abspath(self.export_path)
+        self.export_path += '\\UnrealEngine\\Assets'
+
+        is_exist = os.path.exists(self.export_path)
+        if not is_exist:
+            os.makedirs(self.export_path)
+
+        copy_textures = bpy.context.scene.stu_parameters.copy_textures
+
+        for scene in bpy.data.scenes:
+            context.window.scene = scene
+            bpy.ops.object.select_all(action='DESELECT')
+
+            for collection in scene.collection.children:
+                if collection.asset_data is not None:
+                    for obj in collection.objects:
+                        obj.select_set(True)
+                        triangulate = obj.modifiers.new('EXP_TRI', 'TRIANGULATE')
+                        triangulate.min_vertices = 5
+                        triangulate.keep_custom_normals = True
+
+                        if copy_textures:
+                            for slot in obj.material_slots:
+                                self.export_material(slot.material)
+
+                    bpy.ops.export_scene.fbx(check_existing=False,
+                                             filepath=self.export_path + "/" + collection.name + ".fbx",
+                                             filter_glob="*.fbx",
+                                             use_selection=True,
+                                             object_types={'MESH'},
+                                             bake_space_transform=True,
+                                             mesh_smooth_type='OFF',
+                                             add_leaf_bones=False,
+                                             path_mode='ABSOLUTE',
+                                             axis_forward='X',
+                                             axis_up='Z',
+                                             apply_unit_scale=True,
+                                             apply_scale_options='FBX_SCALE_NONE',
+                                             global_scale=1.0,
+                                             use_triangles=False
+                                             )
+
+                    for obj in collection.objects:
+                        obj.select_set(False)
+                        obj.modifiers.remove(obj.modifiers['EXP_TRI'])
+
+        context.window.scene = start_scene
         return {'FINISHED'}

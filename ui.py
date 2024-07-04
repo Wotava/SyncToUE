@@ -15,7 +15,6 @@ class DATA_UL_AtlasMaterials(bpy.types.UIList):
         return
 
 
-
 class VIEW3D_PT_ModifierManager(bpy.types.Panel):
     bl_label = "Sync to UE"
     bl_space_type = 'VIEW_3D'
@@ -36,6 +35,9 @@ class VIEW3D_PT_ModifierManager(bpy.types.Panel):
         row = layout.row()
         op = row.operator("scene.json_dump", text="Dump only")
         op.write_meshes = False
+
+        row = layout.row()
+        op = row.operator("export_scene.assets", text="Export Assets", icon='ASSET_MANAGER')
 
         context.scene.stu_parameters.draw(layout)
 

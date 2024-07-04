@@ -57,6 +57,18 @@ class ExportParameters(bpy.types.PropertyGroup):
         subtype="DIR_PATH",
         description="Directory to export the scene fbx into")
 
+    # Asset export
+    asset_export_path: StringProperty(
+        name="Asset Export Dir",
+        subtype="DIR_PATH",
+        description="Directory to export assets into")
+
+    copy_textures: BoolProperty(
+        name="Copy Textures to Asset Folder",
+        description="Copy ALL textures to destination folder",
+        default=True
+    )
+
     target_density: FloatProperty(
         name="Target Density",
         description="In p/m on 4k texture",
