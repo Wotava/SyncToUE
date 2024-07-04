@@ -897,12 +897,24 @@ class EXPORT_OP_ExportAssets(bpy.types.Operator):
 
         for scene in bpy.data.scenes:
             context.window.scene = scene
+            view_layer = context.view_layer
             bpy.ops.object.select_all(action='DESELECT')
 
             for collection in scene.collection.children:
                 if collection.asset_data is not None:
+                    # show collection in viewport
+                    layer_collection = view_layer.layer_collection.children[collection.name]
+
+                    initial_visibility = layer_collection.hide_viewport
+                    initial_exclusion = layer_collection.exclude
+                    layer_collection.hide_viewport = False
+                    layer_collection.exclude = False
+                    collection.hide_viewport = False
+
                     for obj in collection.objects:
+                        obj.hide_set(False)
                         obj.select_set(True)
+
                         triangulate = obj.modifiers.new('EXP_TRI', 'TRIANGULATE')
                         triangulate.min_vertices = 5
                         triangulate.keep_custom_normals = True
@@ -931,6 +943,9 @@ class EXPORT_OP_ExportAssets(bpy.types.Operator):
                     for obj in collection.objects:
                         obj.select_set(False)
                         obj.modifiers.remove(obj.modifiers['EXP_TRI'])
+
+                    layer_collection.hide_viewport = initial_visibility
+                    layer_collection.exclude = initial_exclusion
 
         context.window.scene = start_scene
         return {'FINISHED'}
