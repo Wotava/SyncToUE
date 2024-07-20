@@ -39,6 +39,10 @@ class VIEW3D_PT_ModifierManager(bpy.types.Panel):
         row = layout.row()
         op = row.operator("export_scene.assets", text="Export Assets", icon='ASSET_MANAGER')
 
+        row = layout.row()
+        op = row.operator("ed.fix_assets", text="Fix Previews")
+        op = row.operator("ed.update_asset_previews", text="Update Previews")
+
         context.scene.stu_parameters.draw(layout)
 
         box = layout.box()
@@ -55,3 +59,64 @@ class VIEW3D_PT_ModifierManager(bpy.types.Panel):
 
         row = box.row()
         op = row.operator("object.wrap_in_collection", text="Wrap in Collection")
+
+        # Morphs
+        box = layout.box()
+        box.operator_context = 'EXEC_DEFAULT'
+        row = box.row()
+        row.label(text="Morph Quickies")
+        
+        row = box.row()
+        op = row.operator("transform.translate", text="X -0.5")
+        op.value = (-0.5, 0, 0)
+        op = row.operator("transform.translate", text="X 0.5")
+        op.value = (0.5, 0, 0)
+
+        row = box.row()
+        op = row.operator("transform.translate", text="X -0.25")
+        op.value = (-0.25, 0, 0)
+        op = row.operator("transform.translate", text="X 0.25")
+        op.value = (0.25, 0, 0)
+
+        row = box.row()
+        op = row.operator("transform.translate", text="X -0.125")
+        op.value = (-0.125, 0, 0)
+        op = row.operator("transform.translate", text="X 0.125")
+        op.value = (0.125, 0, 0)
+
+        row = box.row()
+        op = row.operator("transform.translate", text="Y -0.5")
+        op.value = (0, -0.5, 0)
+        op = row.operator("transform.translate", text="Y 0.5")
+        op.value = (0, 0.5, 0)
+
+        row = box.row()
+        op = row.operator("transform.translate", text="Y -0.25")
+        op.value = (0, -0.25, 0)
+        op = row.operator("transform.translate", text="Y 0.25")
+        op.value = (0, 0.25, 0)
+
+        row = box.row()
+        op = row.operator("transform.translate", text="Y -0.125")
+        op.value = (0, -0.125, 0)
+        op = row.operator("transform.translate", text="Y 0.125")
+        op.value = (0, 0.125, 0)
+
+        row = box.row()
+        op = row.operator("transform.translate", text="Z -0.5")
+        op.value = (0, 0, -0.5)
+        op = row.operator("transform.translate", text="Z 0.5")
+        op.value = (0, 0, 0.5)
+
+        row = box.row()
+        op = row.operator("transform.translate", text="Z -0.25")
+        op.value = (0, 0, -0.25)
+        op = row.operator("transform.translate", text="Z 0.25")
+        op.value = (0, 0, 0.25)
+
+        row = box.row()
+        op = row.operator("transform.translate", text="Z -0.125")
+        op.value = (0, 0, -0.125)
+        op = row.operator("transform.translate", text="Z 0.125")
+        op.value = (0, 0, 0.125)
+        

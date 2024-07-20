@@ -28,6 +28,8 @@ classes = [
     operators.OBJECT_OP_MatchDataNames,
     operators.OBJECT_OP_AddCollectionNamePrefix,
     operators.OBJECT_OP_WrapInCollection,
+    operators.ED_OP_FixAssets,
+    operators.ED_OP_UpdateAssetPreviews,
     ui.VIEW3D_PT_ModifierManager,
     ui.DATA_UL_AtlasMaterials,
     utils.AtlasMatSlot,

@@ -2,7 +2,7 @@ import random
 
 import bpy
 import mathutils
-from bpy.props import BoolProperty, FloatProperty
+from bpy.props import BoolProperty, FloatProperty, IntProperty
 
 import json
 import os
@@ -854,6 +854,7 @@ class EXPORT_OP_ExportAssets(bpy.types.Operator):
     bl_options = {'REGISTER', 'UNDO'}
 
     exported_materials = []
+    exported_meshes = []
     export_path = ""
     
     @classmethod
@@ -861,7 +862,7 @@ class EXPORT_OP_ExportAssets(bpy.types.Operator):
         return True
 
     def export_material(self, mat):
-        if mat in self.exported_materials:
+        if mat in self.exported_materials or mat.library is not None:
             return
         else:
             self.exported_materials.append(mat)
@@ -875,25 +876,34 @@ class EXPORT_OP_ExportAssets(bpy.types.Operator):
         for texture in textures:
             if texture.type == 'IMAGE' and texture.name[:2] == 'T_' and texture.filepath is not None:
                 source_file = bpy.path.abspath(texture.filepath)
-                copy(source_file, self.export_path)
+                if self.copy_method == 'COPY':
+                    print("????")
+                    copy(source_file, self.export_path)
+                elif self.copy_method == 'LINK':
+                    target = self.export_path + "\\" + texture.name
+                    if os.path.isfile(target):
+                        os.remove(target)
+                    os.system(f"mklink /h \"{target}\" \"{source_file}\"")
         return
 
     def execute(self, context):
         start_scene = context.scene
+        self.exported_materials.clear()
+        self.exported_meshes.clear()
 
         self.export_path = bpy.context.scene.stu_parameters.asset_export_path
+        self.copy_method = bpy.context.scene.stu_parameters.copy_textures
+
         if len(self.export_path) == 0:
             filepath = bpy.data.filepath
             self.export_path = os.path.dirname(filepath)
         else:
             self.export_path = bpy.path.abspath(self.export_path)
-        self.export_path += '\\UnrealEngine\\Assets'
+        self.export_path += f'\\{bpy.path.basename(bpy.context.blend_data.filepath)[:-6]}'
 
         is_exist = os.path.exists(self.export_path)
         if not is_exist:
             os.makedirs(self.export_path)
-
-        copy_textures = bpy.context.scene.stu_parameters.copy_textures
 
         for scene in bpy.data.scenes:
             context.window.scene = scene
@@ -912,6 +922,10 @@ class EXPORT_OP_ExportAssets(bpy.types.Operator):
                     collection.hide_viewport = False
 
                     for obj in collection.objects:
+                        if obj.data.name in self.exported_meshes:
+                            continue
+                        else:
+                            self.exported_meshes.append(obj.data.name)
                         obj.hide_set(False)
                         obj.select_set(True)
 
@@ -919,7 +933,7 @@ class EXPORT_OP_ExportAssets(bpy.types.Operator):
                         triangulate.min_vertices = 5
                         triangulate.keep_custom_normals = True
 
-                        if copy_textures:
+                        if self.copy_method != 'NONE':
                             for slot in obj.material_slots:
                                 self.export_material(slot.material)
 
@@ -942,10 +956,61 @@ class EXPORT_OP_ExportAssets(bpy.types.Operator):
 
                     for obj in collection.objects:
                         obj.select_set(False)
-                        obj.modifiers.remove(obj.modifiers['EXP_TRI'])
+                        if obj.modifiers.get('EXP_TRI'):
+                            obj.modifiers.remove(obj.modifiers['EXP_TRI'])
 
                     layer_collection.hide_viewport = initial_visibility
                     layer_collection.exclude = initial_exclusion
 
         context.window.scene = start_scene
+        return {'FINISHED'}
+
+
+class ED_OP_FixAssets(bpy.types.Operator):
+    """Fix asset previews"""
+    bl_label = "Fix Asset Previews"
+    bl_idname = "ed.fix_assets"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    @classmethod
+    def poll(cls, context):
+        return True
+
+    def execute(self, context):
+        for material in bpy.data.materials:
+            if material.asset_data is None or material.library is not None or material.node_tree is None:
+                continue
+            material.preview_render_type = 'FLAT'
+
+            target_node = None
+            for node in material.node_tree.nodes:
+                if node.type != 'TEX_IMAGE':
+                    continue
+                texture = node.image
+                if texture.type == 'IMAGE' and texture.name[:2] == 'T_' and texture.name[-7:-4] == '_BC':
+                    target_node = node
+                    break
+            if target_node:
+                for node in material.node_tree.nodes:
+                    node.select = False
+                target_node.select = True
+                material.node_tree.nodes.active = target_node
+        return {'FINISHED'}
+
+
+class ED_OP_UpdateAssetPreviews(bpy.types.Operator):
+    """Update previews of all assets in this file"""
+    bl_label = "Update Asset Previews"
+    bl_idname = "ed.update_asset_previews"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    @classmethod
+    def poll(cls, context):
+        return True
+
+    def execute(self, context):
+        for material in bpy.data.materials:
+            if material.asset_data is None or material.library is not None or material.node_tree is None:
+                continue
+            material.asset_generate_preview()
         return {'FINISHED'}
