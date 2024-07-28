@@ -790,18 +790,30 @@ class OBJECT_OP_AddCollectionNamePrefix(bpy.types.Operator):
     bl_idname = "object.add_collection_name_prefix"
     bl_options = {'REGISTER', 'UNDO'}
 
+    set_full_name: BoolProperty(
+        name="Set Full Name",
+        description="Set full name instead of prefix",
+        default=False
+    )
+
     @classmethod
     def poll(cls, context):
         return len(context.visible_objects)
 
     def execute(self, context):
-        if len(context.selected_objects) > 0:
+        if self.set_full_name:
+            targets = [context.active_object]
+        elif len(context.selected_objects) > 0:
             targets = context.selected_objects
         else:
             targets = context.visible_objects
 
         for obj in targets:
-            obj.name = f"{obj.users_collection[0].name}_{obj.name}"
+            if self.set_full_name:
+                obj.name = f"{obj.users_collection[0].name}"
+                obj.data.name = f"{obj.users_collection[0].name}"
+            else:
+                obj.name = f"{obj.users_collection[0].name}_{obj.name}"
 
         return {'FINISHED'}
 

@@ -55,7 +55,9 @@ class VIEW3D_PT_ModifierManager(bpy.types.Panel):
         op.data_to_object = True
 
         row = box.row()
-        op = row.operator("object.add_collection_name_prefix")
+        op = row.operator("object.add_collection_name_prefix", text="Col. Prefix")
+        op = row.operator("object.add_collection_name_prefix", text="Col. Name")
+        op.set_full_name = True
 
         row = box.row()
         op = row.operator("object.wrap_in_collection", text="Wrap in Collection")
