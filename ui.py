@@ -59,6 +59,7 @@ class VIEW3D_PT_ModifierManager(bpy.types.Panel):
 
         row = box.row()
         op = row.operator("object.wrap_in_collection", text="Wrap in Collection")
+        op = row.operator("object.make_base_collection", text="Make Base")
 
         # Morphs
         box = layout.box()

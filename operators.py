@@ -847,6 +847,43 @@ class OBJECT_OP_WrapInCollection(bpy.types.Operator):
         return {'FINISHED'}
 
 
+class OBJECT_OP_MakeBaseCollection(bpy.types.Operator):
+    """Duplicate active collection as BASE collection"""
+    bl_label = "Create BASE Collection"
+    bl_idname = "object.make_base_collection"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    is_child: BoolProperty(
+        name="Set As Child",
+        description="Create BASE collection as a child of active collection",
+        default=False
+    )
+
+    @classmethod
+    def poll(cls, context):
+        return context.collection is not context.scene.collection
+
+    def execute(self, context):
+        view_layer = context.view_layer
+        base_collection = context.collection
+        new_collection = bpy.data.collections.new(base_collection.name + "_BASE")
+        if self.is_child:
+            base_collection.children.link(new_collection)
+        else:
+            context.scene.collection.children.link(new_collection)
+        new_collection.color_tag = 'COLOR_01'
+
+        for obj in base_collection.objects:
+            dupe = obj.copy()
+            dupe.data = dupe.data.copy()
+            new_collection.objects.link(dupe)
+        if self.is_child:
+            view_layer.layer_collection.children[base_collection.name].children[new_collection.name].exclude = True
+        else:
+            view_layer.layer_collection.children[new_collection.name].exclude = True
+        return {'FINISHED'}
+
+
 class EXPORT_OP_ExportAssets(bpy.types.Operator):
     """Export assets in this .blend"""
     bl_label = "Export Assets to FBX"

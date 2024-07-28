@@ -28,6 +28,7 @@ classes = [
     operators.OBJECT_OP_MatchDataNames,
     operators.OBJECT_OP_AddCollectionNamePrefix,
     operators.OBJECT_OP_WrapInCollection,
+    operators.OBJECT_OP_MakeBaseCollection,
     operators.ED_OP_FixAssets,
     operators.ED_OP_UpdateAssetPreviews,
     ui.VIEW3D_PT_ModifierManager,
