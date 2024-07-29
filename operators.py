@@ -669,7 +669,7 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
             directory = os.path.dirname(filepath)
             json_disk = open(directory + "\\level_data.json", "a")
         else:
-            json_disk = open(bpy.path.abspath(json_path), "a")
+            json_disk = open(bpy.path.abspath(json_path) + "\\level_data.json", "a")
 
         json_disk.truncate(0)
         json_disk.write(json_target.as_string())
