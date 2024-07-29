@@ -28,21 +28,22 @@ class VIEW3D_PT_ModifierManager(bpy.types.Panel):
     def draw(self, context):
         layout = self.layout
 
-        row = layout.row()
-        op = row.operator("scene.json_dump", text="Dump and Export")
-        op.write_meshes = True
-
-        row = layout.row()
-        op = row.operator("scene.json_dump", text="Dump only")
+        box = layout.box()
+        box.label(text="JSON", icon='TEXT')
+        row = box.row()
+        op = row.operator("scene.json_dump", text="Scene")
         op.write_meshes = False
+        op = row.operator("scene.json_dump", text="Scene+FBX")
+        op.write_meshes = True
+        row = box.row()
+        op = row.operator("material.json_dump", text="Materials")
 
-        row = layout.row()
-        op = row.operator("material.json_dump", text="Dump Materials")
+        box = layout.box()
+        box.label(text="Asset Tools", icon='ASSET_MANAGER')
+        row = box.row()
+        op = row.operator("export_scene.assets", text="Export Assets", icon='EXPORT')
 
-        row = layout.row()
-        op = row.operator("export_scene.assets", text="Export Assets", icon='ASSET_MANAGER')
-
-        row = layout.row()
+        row = box.row()
         op = row.operator("ed.fix_assets", text="Fix Previews")
         op = row.operator("ed.update_asset_previews", text="Update Previews")
 

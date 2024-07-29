@@ -143,8 +143,28 @@ class ExportParameters(bpy.types.PropertyGroup):
         return True
 
     def draw(self, layout):
+        box = layout.box()
+        box.label(text='JSON Transforms', icon='CON_TRANSFORM')
+        row = box.row()
+        col = row.column()
+        col.label(text='')
+        col = row.column()
+        col.label(text='X')
+        col = row.column()
+        col.label(text='Y')
+        col = row.column()
+        col.label(text='Z')
+
         for prop in list(self.__annotations__):
-            row = layout.row()
+
+            if prop == 'json_path':
+                box = layout.box()
+                box.label(text='Filepaths', icon='FILE_FOLDER')
+            if prop == 'target_density':
+                box = layout.box()
+                box.label(text='Scene Export', icon='SCENE')
+
+            row = box.row()
             if prop not in ['materials', 'active_material_index']:
                 row.prop(self, prop)
 
