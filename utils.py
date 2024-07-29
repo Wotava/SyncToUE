@@ -48,9 +48,14 @@ class ExportParameters(bpy.types.PropertyGroup):
     )
 
     json_path: StringProperty(
-        name="JSON File",
+        name="ObjJSON",
         subtype="FILE_PATH",
         description="JSON file to export the scene data into")
+
+    json_mat_path: StringProperty(
+        name="MatJSON",
+        subtype="FILE_PATH",
+        description="JSON file to export materials data into")
 
     export_path: StringProperty(
         name="Export Dir",

@@ -21,6 +21,7 @@ bl_info = {
 }
 classes = [
     operators.SCENE_OP_DumpToJSON,
+    operators.MAT_OP_DumpToJSON,
     operators.EXPORT_OP_ExportAssets,
     operators.SCENE_OP_AddAtlasMaterialSlot,
     operators.SCENE_OP_RemoveAtlasMaterialSlot,

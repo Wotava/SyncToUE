@@ -37,6 +37,9 @@ class VIEW3D_PT_ModifierManager(bpy.types.Panel):
         op.write_meshes = False
 
         row = layout.row()
+        op = row.operator("material.json_dump", text="Dump Materials")
+
+        row = layout.row()
         op = row.operator("export_scene.assets", text="Export Assets", icon='ASSET_MANAGER')
 
         row = layout.row()

@@ -27,6 +27,12 @@ slope_uv_layer = target_uv_names[2]
 bake_atlas_layer = target_uv_names[1]
 
 
+skip_nodes = ['MN_Panel_Common']
+
+def snake_case(string: str) -> str:
+    return string.lower().replace(" ", "_")
+
+
 class Report:
     __text = None
     __specialities = dict()
@@ -63,6 +69,88 @@ class Report:
     def nl(self, count=1):
         for _ in range(count):
             self.__text.write("\n")
+
+
+class MAT_OP_DumpToJSON(bpy.types.Operator):
+    """Dump materials to JSON"""
+    bl_label = "Dump Materials to JSON"
+    bl_idname = "material.json_dump"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    @classmethod
+    def poll(cls, context):
+        return True
+
+    def execute(self, context):
+        material_array = []
+
+        json_target = bpy.data.texts.get("JSON_materials")
+        if not json_target:
+            json_target = bpy.data.texts.new("JSON_materials")
+        else:
+            json_target.clear()
+
+        for mat in bpy.data.materials:
+            if not mat.node_tree:
+                continue
+
+            container = dict()
+            container["MAT_NAME"] = mat.name
+
+            sub_float = dict()
+            sub_texture = dict()
+
+            if "_PAN_" in mat.name:
+                container["MAT_TYPE"] = 'PANEL'
+                for node in mat.node_tree.nodes:
+                    if node.type == 'TEX_IMAGE' and node.image.type == 'IMAGE' and node.image.name[:2] == 'T_':
+                        parent = node.parent.label.split()
+                        parent = parent[0][0] + parent[1][0]
+
+                        if node.parent.label == 'Grunge Textures':
+                            texture_type = node.outputs['Color'].links[0].to_socket.name
+                        else:
+                            texture_type = node.image.name.split('_')[-1]
+                            texture_type = texture_type.split('.')[0]
+
+                        sub_texture[f"{parent}_{texture_type}"] = node.image.name.split('.')[0]
+                    elif node.type == 'GROUP' and node.node_tree.name not in skip_nodes:
+                        for n_input in node.inputs:
+                            if n_input.type == 'VALUE' and len(n_input.links) == 0:
+                                sub_float[n_input.name] = n_input.default_value
+
+            elif mat.name[:3] == 'MI_':
+                container["MAT_TYPE"] = 'COMMON'
+                for node in mat.node_tree.nodes:
+                    if node.type != 'TEX_IMAGE':
+                        continue
+                    if node.image.type == 'IMAGE' and node.image.name[:2] == 'T_':
+                        texture_type = node.image.name.split('_')[-1]
+                        texture_type = texture_type.split('.')[0]
+                        sub_texture[f"{texture_type}"] = node.image.name.split('.')[0]
+
+            container["FLOAT_VALUES"] = sub_float
+            container["TEXTURES"] = sub_texture
+
+            material_array.append(container)
+
+        json_target.write("{\"array\":")
+        json_target.write(json.dumps(material_array, sort_keys=True, indent=4))
+        json_target.write("}")
+
+        json_path = context.scene.stu_parameters.json_mat_path
+        if len(json_path) == 0:
+            filepath = bpy.data.filepath
+            directory = os.path.dirname(filepath)
+            json_disk = open(directory + "\\materials.json", "a")
+        else:
+            json_disk = open(bpy.path.abspath(json_path) + "\\materials.json", "a")
+
+        json_disk.truncate(0)
+        json_disk.write(json_target.as_string())
+        json_disk.close()
+
+        return {'FINISHED'}
 
 
 class SCENE_OP_DumpToJSON(bpy.types.Operator):
