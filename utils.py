@@ -91,11 +91,11 @@ class ExportParameters(bpy.types.PropertyGroup):
     )
     bake_ue: BoolProperty(
         name="Output UE fbx",
-        default=False
+        default=True
     )
     bake_houdini: BoolProperty(
         name="Output Houdini fbx",
-        default=False
+        default=True
     )
     internal_padding: FloatProperty(
         name="Extra Padding",

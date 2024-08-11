@@ -181,14 +181,17 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
     # expects already "prepared" object on input
     def export_fbx(self, obj, target='UE'):
         if target == 'UE' and not self.stu_params.bake_ue:
+            print("Requested UE export target is not enabled")
             return
         elif target != 'UE' and not self.stu_params.bake_houdini:
+            print("Requested Houdini export target is not enabled")
             return
 
         if not obj and target == 'UE':
             raise Exception
 
         if not self.write_meshes:
+            print("Mesh export is disabled")
             return
 
         export_path = bpy.context.scene.stu_parameters.export_path
@@ -1146,6 +1149,9 @@ class ED_OP_UpdateAssetPreviews(bpy.types.Operator):
         return True
 
     def execute(self, context):
+        for collection in bpy.data.collections:
+            if collection.asset_data and collection.library is None:
+                collection.asset_generate_preview()
         for material in bpy.data.materials:
             if material.asset_data is None or material.library is not None or material.node_tree is None:
                 continue
