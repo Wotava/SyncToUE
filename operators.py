@@ -20,11 +20,13 @@ light_multiplier = 1.0
 
 table_justify = 40
 
-target_uv_names = ['UVMap', 'UVAtlas', 'UV_SlopePreset', 'UVInset']
+target_uv_names = ['UVMap', 'UVLightmap', 'UVAtlas', 'UVInset', 'UVPanelPreset']
 panel_preset_attribute = 'panel_preset_index'
 inset_uv_layer = target_uv_names[3]
-slope_uv_layer = target_uv_names[2]
-bake_atlas_layer = target_uv_names[1]
+slope_uv_layer = target_uv_names[4]
+
+bake_atlas_layer_index = 2
+bake_atlas_layer = target_uv_names[bake_atlas_layer_index]
 
 skip_nodes = ['MN_Panel_Common', 'MN_Architectural_Common']
 ignore_params = ['Bombing Chance', 'Bombing Scale', 'Invert Normal Green', 'Invert Decal Normal Green',
@@ -484,9 +486,9 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
             if has_inset:
                 obj.data.uv_layers.get(inset_uv_layer).data.foreach_get('uv', uv_temp)
 
-            if len(obj.data.uv_layers) < 4:
-                for layer in target_uv_names[len(obj.data.uv_layers):]:
-                    obj.data.uv_layers.new().name = layer
+            if len(obj.data.uv_layers) < len(target_uv_names):
+                for _ in range(len(target_uv_names) - len(obj.data.uv_layers)):
+                    obj.data.uv_layers.new()
 
             for i, name in enumerate(target_uv_names):
                 obj.data.uv_layers[i].name = name
@@ -497,8 +499,8 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
 
             # refresh UVAtlas content
             obj.data.uv_layers[0].data.foreach_get('uv', uv_temp)
-            obj.data.uv_layers[1].data.foreach_set('uv', uv_temp)
-            obj.data.uv_layers.active_index = 1
+            obj.data.uv_layers[bake_atlas_layer_index].data.foreach_set('uv', uv_temp)
+            obj.data.uv_layers.active_index = bake_atlas_layer_index
 
             # write slope from selection
             preset_temp = np.zeros(len(obj.data.polygons), dtype=float)
