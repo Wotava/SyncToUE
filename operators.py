@@ -26,8 +26,17 @@ inset_uv_layer = target_uv_names[3]
 slope_uv_layer = target_uv_names[2]
 bake_atlas_layer = target_uv_names[1]
 
+skip_nodes = ['MN_Panel_Common', 'MN_Architectural_Common']
+ignore_params = ['Bombing Chance', 'Bombing Scale', 'Invert Normal Green', 'Invert Decal Normal Green',
+                 'Vignette Random 1 Min', 'Vignette Random 1 Max', 'Vignette Random 2 Min', 'Vignette Random 2 Max',
+                 'Vignette Color', 'Leak Background Opacity', 'Leak Background Distance', 'Leak Opacity',
+                 'Leak Spacing', 'Vignette Blend Saturation']
 
-skip_nodes = ['MN_Panel_Common']
+wl_alias = {
+    "BCA": "BCO"
+}
+
+export_names = ['Brick', 'Concrete', 'Metal', 'Tiles']
 
 def snake_case(string: str) -> str:
     return string.lower().replace(" ", "_")
@@ -81,6 +90,14 @@ class MAT_OP_DumpToJSON(bpy.types.Operator):
     def poll(cls, context):
         return True
 
+    def get_base_name(self, mat):
+        name = mat.name
+        tags = ['MI', 'TP', 'UV', 'WL', 'PAN', 'ARCH']
+        for tag in tags:
+            name = name.replace(tag + "_", '')
+        name = name.split('_')
+        return name[0] + "_" + name[1]
+
     def execute(self, context):
         material_array = []
 
@@ -94,40 +111,73 @@ class MAT_OP_DumpToJSON(bpy.types.Operator):
             if not mat.node_tree:
                 continue
 
+            for name in export_names:
+                if name in mat.name:
+                    break
+            else:
+                continue
+                
+            if "_Panel_" in mat.name:
+                continue
+
             container = dict()
-            container["MAT_NAME"] = mat.name
+            container["MAT_NAME"] = mat.name.replace('MI_', '')
+            container["BASE_NAME"] = self.get_base_name(mat)
 
             sub_float = dict()
             sub_texture = dict()
 
             if "_PAN_" in mat.name:
-                container["MAT_TYPE"] = 'PANEL'
+                container["PARENT"] = 2
+
                 for node in mat.node_tree.nodes:
                     if node.type == 'TEX_IMAGE' and node.image.type == 'IMAGE' and node.image.name[:2] == 'T_':
-                        parent = node.parent.label.split()
-                        parent = parent[0][0] + parent[1][0]
+                        texture_type = node.image.name.split('_')[-1]
+                        texture_type = texture_type.split('.')[0]
 
                         if node.parent.label == 'Grunge Textures':
-                            texture_type = node.outputs['Color'].links[0].to_socket.name
+                            if not container.get('Grunge'):
+                                sub_texture['Grunge'] = node.image.name.split('.')[0]
+                        elif node.parent.label == 'Decal Textures':
+                            if texture_type in wl_alias:
+                                t_name = node.image.name.split('.')[0].replace(texture_type, wl_alias.get(texture_type))
+                                texture_type = wl_alias.get(texture_type)
+                                sub_texture[f"Line_{texture_type}"] = t_name
+                            else:
+                                sub_texture[f"Line_{texture_type}"] = node.image.name.split('.')[0]
+                        elif node.parent.label == 'Base Textures':
+                            sub_texture[f"Base_{texture_type}"] = node.image.name.split('.')[0]
                         else:
-                            texture_type = node.image.name.split('_')[-1]
-                            texture_type = texture_type.split('.')[0]
+                            sub_texture[f"UNKNOWN_{texture_type}"] = node.image.name.split('.')[0]
 
-                        sub_texture[f"{parent}_{texture_type}"] = node.image.name.split('.')[0]
                     elif node.type == 'GROUP' and node.node_tree.name not in skip_nodes:
                         for n_input in node.inputs:
+                            if n_input.name in ignore_params:
+                                continue
                             if n_input.type == 'VALUE' and len(n_input.links) == 0:
                                 sub_float[n_input.name] = n_input.default_value
 
             elif mat.name[:3] == 'MI_':
-                container["MAT_TYPE"] = 'COMMON'
+                if '_ARCH_' in mat.name:
+                    container["PARENT"] = 1
+                    prefix = "Base_"
+                else:
+                    container["PARENT"] = 0
+                    prefix = ""
+
                 for node in mat.node_tree.nodes:
-                    if node.type != 'TEX_IMAGE':
-                        continue
-                    if node.image.type == 'IMAGE' and node.image.name[:2] == 'T_':
+                    if node.type == 'GROUP' and node.node_tree.name not in skip_nodes:
+                        for n_input in node.inputs:
+                            if n_input.name in ignore_params:
+                                continue
+                            if n_input.type == 'VALUE' and len(n_input.links) == 0:
+                                sub_float[n_input.name] = n_input.default_value
+                    elif node.type == 'TEX_IMAGE' and node.image.type == 'IMAGE' and node.image.name[:2] == 'T_':
                         texture_type = node.image.name.split('_')[-1]
                         texture_type = texture_type.split('.')[0]
-                        sub_texture[f"{texture_type}"] = node.image.name.split('.')[0]
+                        sub_texture[f"{prefix}{texture_type}"] = node.image.name.split('.')[0]
+                    else:
+                        continue
 
             container["FLOAT_VALUES"] = sub_float
             container["TEXTURES"] = sub_texture
