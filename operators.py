@@ -414,6 +414,7 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
 
             if baked:
                 self.export_scene.collection.objects.link(new_obj)
+                self.max_v_udim = max(count, self.max_v_udim)
             if (baked and count == 1) or unique:
                 self.unique_scene.collection.objects.link(new_obj)
         return
@@ -423,6 +424,7 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
         self.hash_count.clear()
         self.hash_data.clear()
         self.object_array = []
+        self.max_v_udim = 0
 
         self.stu_params = context.scene.stu_parameters
         target_td = self.stu_params.target_density
@@ -757,7 +759,7 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
         json_disk.write(json_target.as_string())
         json_disk.close()
 
-        self.report({'INFO'}, "Finished as expected. UNDO now to return to previous state")
+        self.report({'INFO'}, f"Expect {self.max_v_udim} vertical UDIMs. UNDO now to return to previous state")
         return {'FINISHED'}
 
 
