@@ -257,9 +257,8 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
             bpy.ops.object.select_all(action='DESELECT')
 
             export_path += '\\UnrealEngine'
-            name = obj.name
-            dummy = obj.copy()
-            bpy.context.scene.collection.objects.link(dummy)
+            name = obj.data.name
+            dummy = obj
             dummy.select_set(True)
 
             bpy.context.view_layer.objects.active = dummy
@@ -298,9 +297,6 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
                                  global_scale=export_global_scale,
                                  use_triangles=False
                                  )
-
-        if target == 'UE':
-            bpy.data.objects.remove(dummy)
 
     def make_obj_name(self, mesh_data, count) -> str:
         base_name = mesh_data.name
@@ -373,10 +369,31 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
         return container
 
     def duplicate_to_export(self, obj) -> None:
-        geo_hash = hash_geometry(obj)
+        geo_hash = hash_geometry(obj.data)
+
+        baked = False
+        unique = False
+
+        for slot in obj.material_slots:
+            if slot.name in self.stu_params:
+                baked = True
+
         if geo_hash not in self.hash_data:
+            # check if this data is linked and if it differs from original data
+            original = bpy.data.meshes.get(obj.data.name)
+            if original is not None and original.library is not None:
+                original_hash = hash_geometry(original)
+                if geo_hash != original_hash:
+                    unique = True
+                else:
+                    unique = False
+            else:
+                unique = True
+
             # make evaluated copy mesh data
             new_mesh = bpy.data.meshes.new_from_object(obj)
+            if new_mesh.name[:3] != 'SM_':
+                new_mesh.name = 'SM_' + obj.data.name
             self.hash_data.update({geo_hash: new_mesh})
             self.hash_count.update({geo_hash: 0})
         else:
@@ -388,19 +405,24 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
         # link to export scene, generate name accordingly
         # write object custom property with count for later use with UV offset
         count = self.hash_count.get(geo_hash)
-        name = self.make_obj_name(new_mesh, count)
-        new_obj = bpy.data.objects.new(name, new_mesh)
-        new_obj['instance_count'] = count
-        copy_transform(obj, new_obj)
+        self.object_array.append(self.make_dict(obj, new_mesh.name))
 
-        self.export_scene.collection.objects.link(new_obj)
+        if unique or baked:
+            name = self.make_obj_name(new_mesh, count)
+            new_obj = bpy.data.objects.new(name, new_mesh)
+            copy_transform(obj, new_obj)
+
+            if baked:
+                self.export_scene.collection.objects.link(new_obj)
+            if (baked and count == 1) or unique:
+                self.unique_scene.collection.objects.link(new_obj)
         return
 
     def execute(self, context):
         self.exported_variants.clear()
         self.hash_count.clear()
         self.hash_data.clear()
-        object_array = []
+        self.object_array = []
 
         self.stu_params = context.scene.stu_parameters
         target_td = self.stu_params.target_density
@@ -416,8 +438,10 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
 
         if bpy.data.scenes.get('ExportScene'):
             self.export_scene = bpy.data.scenes.get('ExportScene')
+            self.unique_scene = bpy.data.scenes.get('UniqueScene')
         else:
             self.export_scene = bpy.data.scenes.new('ExportScene')
+            self.unique_scene = bpy.data.scenes.new('UniqueScene')
 
         # PASS 1: make copy of current scene with all objects without modifiers
         t_len = len(context.visible_objects)
@@ -427,7 +451,7 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
                 continue
 
             if obj.type == 'LIGHT':
-                object_array.append(self.make_dict(obj))
+                self.object_array.append(self.make_dict(obj))
                 continue
 
             evaluated_obj = obj.evaluated_get(depsgraph)
@@ -439,12 +463,13 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
 
                     elif inst.object.type == 'LIGHT':
                         # we don't export lights, just write it straight to json and forget
-                        object_array.append(self.make_dict(inst.object, inst.object.name))
+                        self.object_array.append(self.make_dict(inst.object, inst.object.name))
 
             if evaluated_obj.data and len(evaluated_obj.data.polygons) > 0:
                 self.duplicate_to_export(evaluated_obj)
             print(f"Processed {(i + 1) / t_len * 100:.2f}% of objects")
 
+        ###
         # PASS 2: pack all geometry, set texel density
         # switch scene to export and context to uv-view/3d-view by the name 'UV Editing'
         print(f"Pass 2 start")
@@ -529,7 +554,7 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
 
             slope_uv.data.foreach_set("uv", uv_temp)
             del uv_temp
-
+        ###
         # Deselect all un-important UVs by material (only building materials matter)
         # and calculate TD approx in the meantime
         print("Deselecting non-Atlas UV islands")
@@ -654,26 +679,19 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
         # between edit and object modes after making all objects single-user
         # So first I write JSON and make mesh data single user, then switch context mode and then offset UVs
         print(f"Pass 3 start")
-        for obj in bpy.context.visible_objects:
-            object_array.append(self.make_dict(obj, obj.data.name))
-
         bpy.ops.object.select_all(action='SELECT')
-        bpy.ops.object.make_single_user(type='SELECTED_OBJECTS', object=True, obdata=True, material=False,
+        bpy.ops.object.make_single_user(type='SELECTED_OBJECTS', object=False, obdata=True, material=False,
                                         animation=False, obdata_animation=True)
         bpy.ops.object.mode_set(mode='EDIT')
         bpy.ops.object.mode_set(mode='OBJECT')
         bpy.context.view_layer.update()
 
-        print(f"Begin export")
+        print(f"Begin export HOUDINI")
+        print(f"UDIM offset")
         t_len = len(self.hash_count)
         i = 0
         for obj in bpy.context.visible_objects:
-            if obj.name[-2:] == '_0':
-                # export as unique
-                self.export_fbx(obj, target='UE')
-                print(f"Export progress: {(i + 1) / t_len * 100:.1f}% of unique objects exported")
-                i += 1
-            else:
+            if obj.name[-2:] != '_0':
                 v_offset = max_v * ((int(obj.name.split('_')[-1])) // horizontal_udims)
                 u_offset = max_u * ((int(obj.name.split('_')[-1])) % horizontal_udims)
                 offset = Vector((u_offset, v_offset))
@@ -711,11 +729,20 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
                 obj.scale = 1, 1, 1
                 obj.data.flip_normals()
         self.export_fbx(None, target='Houdini')
-        print("Finish export")
+        print("Finish large scene export")
+
+        print("Export assets to UE fbx")
+        context.window.scene = self.unique_scene
+        bpy.ops.object.select_all(action='SELECT')
+        context.view_layer.objects.active = context.selected_objects[0]
+        for obj in context.visible_objects:
+            if obj.name[-2:] == '_0':
+                # export as unique
+                self.export_fbx(obj, target='UE')
 
         # PASS 4: fill and save internal and on-disk JSON files
         json_target.write("{\"array\":")
-        json_target.write(json.dumps(object_array, sort_keys=True, indent=4))
+        json_target.write(json.dumps(self.object_array, sort_keys=True, indent=4))
         json_target.write("}")
 
         json_path = context.scene.stu_parameters.json_path

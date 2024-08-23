@@ -120,6 +120,11 @@ class ExportParameters(bpy.types.PropertyGroup):
         type=AtlasMatSlot,
         name="Atlas-baked Materials"
     )
+    baked_material_suffixes: StringProperty(
+        name="Bake Tags",
+        description="Split by coma",
+        default='_ARCH_, _PAN_'
+    )
 
     def add_material_slot(self):
         self.materials.add()
@@ -130,8 +135,9 @@ class ExportParameters(bpy.types.PropertyGroup):
         self.active_material_index -= 1
 
     def __contains__(self, item):
-        for mat_slot in self.materials:
-            if mat_slot.material.name == item:
+        suffixes = self.baked_material_suffixes.replace(' ', '').split(',')
+        for suffix in suffixes:
+            if suffix in item:
                 return True
         return False
 
@@ -205,9 +211,9 @@ def hash_uv_maps(data):
     return hashes
 
 
-def hash_geometry(obj) -> int:
-    face_hash = get_polygon_data(obj.data).tobytes()
-    uv_hash = str(hash_uv_maps(obj.data))
+def hash_geometry(data) -> int:
+    face_hash = get_polygon_data(data).tobytes()
+    uv_hash = str(hash_uv_maps(data))
     return hash(tuple([face_hash, uv_hash]))
 
 
