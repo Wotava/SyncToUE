@@ -298,15 +298,28 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
                                  use_triangles=False
                                  )
 
-    def make_obj_name(self, mesh_data, count) -> str:
+    def make_new_mesh_name(self, mesh_data) -> str:
         base_name = mesh_data.name
-        if base_name[:3] != 'SM_':
-            base_name = 'SM_' + base_name
         base_name = base_name.replace('.', '_')
-        base_name += f"_{count}"
-        return base_name
 
-    def make_dict(self, obj, name=None) -> dict:
+        base_name_split = base_name.split('_')
+        if base_name_split[0] != 'SM':
+            base_name_split.insert(0, 'SM')
+        if base_name_split[1] != self.scene_tag:
+            base_name_split.insert(1, self.scene_tag)
+        base_name = '_'.join(base_name_split)
+
+        adjusted_name = base_name
+        for i in range(1000):
+            if bpy.data.meshes.get(adjusted_name):
+                adjusted_name = f"{base_name}_{i}"
+            else:
+                break
+        else:
+            raise Exception
+        return adjusted_name
+
+    def make_dict(self, obj, name=None, count=None) -> dict:
         container = dict()
 
         params = bpy.context.scene.stu_parameters
@@ -343,6 +356,11 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
         container["LOCATION"] = (loc * unit_multiplier).to_tuple()
         container["ROTATION"] = rot[0:3]
         container["SCALE"] = scale.to_tuple()
+
+        if count:
+            container["INSTANCE_COUNT"] = count
+        else:
+            container["INSTANCE_COUNT"] = 0
 
         # light shenanigans
         if obj.type == 'LIGHT':
@@ -392,8 +410,7 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
 
             # make evaluated copy mesh data
             new_mesh = bpy.data.meshes.new_from_object(obj)
-            if new_mesh.name[:3] != 'SM_':
-                new_mesh.name = 'SM_' + obj.data.name
+            new_mesh.name = self.make_new_mesh_name(obj.data)
             self.hash_data.update({geo_hash: new_mesh})
             self.hash_count.update({geo_hash: 0})
         else:
@@ -405,10 +422,10 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
         # link to export scene, generate name accordingly
         # write object custom property with count for later use with UV offset
         count = self.hash_count.get(geo_hash)
-        self.object_array.append(self.make_dict(obj, new_mesh.name))
+        self.object_array.append(self.make_dict(obj, new_mesh.name, count))
 
         if unique or baked:
-            name = self.make_obj_name(new_mesh, count)
+            name = f"{new_mesh.name}_{count}"
             new_obj = bpy.data.objects.new(name, new_mesh)
             copy_transform(obj, new_obj)
 
