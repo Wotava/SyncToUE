@@ -436,12 +436,24 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
                 self.unique_scene.collection.objects.link(new_obj)
         return
 
+    def switch_scene(self, scene) -> None:
+        context = bpy.context
+        context.window.scene = scene
+        bpy.ops.object.select_all(action='SELECT')
+        context.view_layer.objects.active = context.selected_objects[0]
+        return
+
     def execute(self, context):
         self.exported_variants.clear()
         self.hash_count.clear()
         self.hash_data.clear()
         self.object_array = []
         self.max_v_udim = 0
+        self.scene_tag = context.scene.name
+
+        if 'Scene' in self.scene_tag:
+            self.report({'ERROR'}, f"Change scene name [{self.scene_tag}]")
+            return {'CANCELLED'}
 
         self.stu_params = context.scene.stu_parameters
         target_td = self.stu_params.target_density
@@ -492,10 +504,7 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
         # PASS 2: pack all geometry, set texel density
         # switch scene to export and context to uv-view/3d-view by the name 'UV Editing'
         print(f"Pass 2 start")
-        context.window.scene = self.export_scene
-        bpy.ops.object.select_all(action='SELECT')
-
-        context.view_layer.objects.active = context.selected_objects[0]
+        self.switch_scene(self.export_scene)
 
         if context.workspace.name != 'UV Editing':
             self.report({'ERROR'}, "Please open default UV Editing workspace with exact name 'UV Editing'")
@@ -693,11 +702,18 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
                 uv.data.foreach_set('uv', scaled_uv.ravel())
 
         # PASS 3: export objects to UE/Houdini folders and write JSON
+        print(f"Pass 3 start")
+        print("Export assets to UE fbx")
+        self.switch_scene(self.unique_scene)
+        for obj in context.visible_objects:
+            if obj.name[-2:] == '_0':
+                # export as unique
+                self.export_fbx(obj, target='UE')
 
         # I can't get "fresh" mesh data blocks from here for some reason if I don't switch back and forth
         # between edit and object modes after making all objects single-user
         # So first I write JSON and make mesh data single user, then switch context mode and then offset UVs
-        print(f"Pass 3 start")
+        self.switch_scene(self.export_scene)
         bpy.ops.object.select_all(action='SELECT')
         bpy.ops.object.make_single_user(type='SELECTED_OBJECTS', object=False, obdata=True, material=False,
                                         animation=False, obdata_animation=True)
@@ -707,8 +723,6 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
 
         print(f"Begin export HOUDINI")
         print(f"UDIM offset")
-        t_len = len(self.hash_count)
-        i = 0
         for obj in bpy.context.visible_objects:
             if obj.name[-2:] != '_0':
                 v_offset = max_v * ((int(obj.name.split('_')[-1])) // horizontal_udims)
@@ -749,15 +763,6 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
                 obj.data.flip_normals()
         self.export_fbx(None, target='Houdini')
         print("Finish large scene export")
-
-        print("Export assets to UE fbx")
-        context.window.scene = self.unique_scene
-        bpy.ops.object.select_all(action='SELECT')
-        context.view_layer.objects.active = context.selected_objects[0]
-        for obj in context.visible_objects:
-            if obj.name[-2:] == '_0':
-                # export as unique
-                self.export_fbx(obj, target='UE')
 
         # PASS 4: fill and save internal and on-disk JSON files
         json_target.write("{\"array\":")
