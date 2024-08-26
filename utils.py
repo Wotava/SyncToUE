@@ -20,7 +20,7 @@ class ExportParameters(bpy.types.PropertyGroup):
     flip_rot: BoolVectorProperty(
         name="Rotation Flips",
         size=3,
-        default=[True, True, True]
+        default=[False, True, True]
     )
     adjust_rot: BoolProperty(
         name="Adjust rot to -pi + rot",
@@ -219,7 +219,6 @@ def hash_geometry(data) -> int:
 
 def get_world_transform(obj):
     world_matrix = obj.matrix_world
-
     loc = world_matrix.to_translation()
     rot = world_matrix.to_euler()
     scale = world_matrix.to_scale()
@@ -227,10 +226,9 @@ def get_world_transform(obj):
     scale_matrix = Matrix.Diagonal(scale)
 
     for s in scale:
-        if s > 0:
-            continue
-    else:
-        rot = (rot.to_matrix() @ scale_matrix).to_euler()
+        if s < 0:
+            rot = (rot.to_matrix() @ scale_matrix).to_euler()
+            break
 
     return loc, rot, scale
 
