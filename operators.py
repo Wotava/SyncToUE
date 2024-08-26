@@ -277,6 +277,12 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
             export_scale = 'FBX_SCALE_UNITS'
             export_global_scale = 1
 
+        # add triangulate modifier
+        if obj:
+            tri_mod = obj.modifiers.new('EXPORT_TRIANGULATE', 'TRIANGULATE')
+            tri_mod.min_vertices = 5
+            tri_mod.keep_custom_normals = True
+
         is_exist = os.path.exists(export_path)
         if not is_exist:
             os.makedirs(export_path)
