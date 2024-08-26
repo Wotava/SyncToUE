@@ -675,25 +675,23 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
             max_v = max(max_v, np.max(uv_temp[1::2]))
             max_u = max(max_u, np.max(uv_temp[::2]))
 
-        max_v *= uv_multiplier
-        max_u *= uv_multiplier
-
-        max_u += self.stu_params.internal_padding
-        max_v += self.stu_params.internal_padding
+        adjusted_max_v = max_v * uv_multiplier + self.stu_params.internal_padding
+        adjusted_max_u = max_u * uv_multiplier + self.stu_params.internal_padding
 
         # squeeze more instances in one UDIM
-        squeezed_v_mult = 1 / ceil(1 / max_v) / max_v
-        squeezed_u_mult = 1 / ceil(1 / max_u) / max_u
+        squeezed_v_mult = 1 / ceil(1 / adjusted_max_v) / adjusted_max_v
+        squeezed_u_mult = 1 / ceil(1 / adjusted_max_u) / adjusted_max_u
 
         global_multiplier = uv_multiplier
         global_multiplier *= min(squeezed_u_mult, squeezed_v_mult)
 
-        max_u = max_u / uv_multiplier * global_multiplier
-        max_v = max_v / uv_multiplier * global_multiplier
+        adjusted_max_u = max_u * global_multiplier
+        adjusted_max_v = max_v * global_multiplier
 
         print(f"Requested TD {target_td}, actual TD {target_td / uv_multiplier * global_multiplier}")
         # calc amount of horizontal udims
-        horizontal_udims = int(1 / max_u)
+        horizontal_udims = int(1 / adjusted_max_u)
+        self.max_v_udim = ceil((self.max_v_udim / (1 / adjusted_max_v)) / horizontal_udims)
         print(f"Horizontal UDIMs: {horizontal_udims}")
 
         print("Start UV scaling")
@@ -731,8 +729,8 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
         print(f"UDIM offset")
         for obj in bpy.context.visible_objects:
             if obj.name[-2:] != '_0':
-                v_offset = max_v * ((int(obj.name.split('_')[-1])) // horizontal_udims)
-                u_offset = max_u * ((int(obj.name.split('_')[-1])) % horizontal_udims)
+                v_offset = adjusted_max_v * ((int(obj.name.split('_')[-1])) // horizontal_udims)
+                u_offset = adjusted_max_u * ((int(obj.name.split('_')[-1])) % horizontal_udims)
                 offset = Vector((u_offset, v_offset))
 
                 if self.stu_params.check_obj(obj):
@@ -787,7 +785,8 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
         json_disk.write(json_target.as_string())
         json_disk.close()
 
-        self.report({'INFO'}, f"Expect {self.max_v_udim} vertical UDIMs. UNDO now to return to previous state")
+        self.report({'INFO'}, f"UDIM grid: {ceil(adjusted_max_u)}u x {self.max_v_udim}v. "
+                              f"UNDO now to return to previous state")
         return {'FINISHED'}
 
 

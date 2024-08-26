@@ -87,7 +87,7 @@ class ExportParameters(bpy.types.PropertyGroup):
     target_resolution: FloatProperty(
         name="Target Resolution",
         description="Target image texture resolution",
-        default=1024
+        default=4096
     )
     bake_ue: BoolProperty(
         name="Output UE fbx",
