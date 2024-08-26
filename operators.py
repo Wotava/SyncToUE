@@ -450,7 +450,8 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
         context = bpy.context
         context.window.scene = scene
         bpy.ops.object.select_all(action='SELECT')
-        context.view_layer.objects.active = context.selected_objects[0]
+        if len(context.selected_objects) > 0:
+            context.view_layer.objects.active = context.selected_objects[0]
         return
 
     def execute(self, context):
