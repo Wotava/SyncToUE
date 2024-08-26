@@ -231,7 +231,7 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
         return context.workspace.name == 'UV Editing'
 
     # expects already "prepared" object on input
-    def export_fbx(self, obj, target='UE'):
+    def export_fbx(self, obj, target='UE', copy=True):
         if target == 'UE' and not self.stu_params.bake_ue:
             print("Requested UE export target is not enabled")
             return
@@ -258,7 +258,11 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
 
             export_path += '\\UnrealEngine'
             name = obj.data.name
-            dummy = obj
+            if copy:
+                dummy = obj.copy()
+                bpy.context.scene.collection.objects.link(dummy)
+            else:
+                dummy = obj
             dummy.select_set(True)
 
             bpy.context.view_layer.objects.active = dummy
