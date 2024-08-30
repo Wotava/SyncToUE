@@ -68,17 +68,6 @@ class ExportParameters(bpy.types.PropertyGroup):
         subtype="DIR_PATH",
         description="Directory to export assets into")
 
-    copy_textures: EnumProperty(
-        name="Copy Textures to Asset Folder",
-        description="Copy ALL textures to destination folder",
-        items=[
-            ('NONE', "Don't Copy", ""),
-            ('COPY', "Full Copy", ""),
-            ('LINK', "Symlink", ""),
-        ],
-        default='COPY'
-    )
-
     target_density: FloatProperty(
         name="Target Density",
         description="In p/m on 4k texture",

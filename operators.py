@@ -1112,116 +1112,108 @@ class EXPORT_OP_ExportAssets(bpy.types.Operator):
     bl_idname = "export_scene.assets"
     bl_options = {'REGISTER', 'UNDO'}
 
-    exported_materials = []
-    exported_meshes = []
+    exported_hashes = []
     export_path = ""
     
     @classmethod
     def poll(cls, context):
         return True
 
-    def export_material(self, mat):
-        if mat in self.exported_materials or mat.library is not None:
-            return
-        else:
-            self.exported_materials.append(mat)
-
-        textures = []
-        if mat.node_tree:
-            for node in mat.node_tree.nodes:
-                if node.type == 'TEX_IMAGE':
-                    textures.append(node.image)
-
-        for texture in textures:
-            if texture.type == 'IMAGE' and texture.name[:2] == 'T_' and texture.filepath is not None:
-                source_file = bpy.path.abspath(texture.filepath)
-                if self.copy_method == 'COPY':
-                    print("????")
-                    copy(source_file, self.export_path)
-                elif self.copy_method == 'LINK':
-                    target = self.export_path + "\\" + texture.name
-                    if os.path.isfile(target):
-                        os.remove(target)
-                    os.system(f"mklink /h \"{target}\" \"{source_file}\"")
-        return
-
     def execute(self, context):
-        start_scene = context.scene
-        self.exported_materials.clear()
-        self.exported_meshes.clear()
+        self.exported_hashes.clear()
+        self.depsgraph = bpy.context.evaluated_depsgraph_get()
 
         self.export_path = bpy.context.scene.stu_parameters.asset_export_path
-        self.copy_method = bpy.context.scene.stu_parameters.copy_textures
+
+        if bpy.data.scenes.get('ExportScene'):
+            bpy.data.scenes.remove(bpy.data.scenes.get('ExportScene'))
+
+        self.export_scene = bpy.data.scenes.new('ExportScene')
 
         if len(self.export_path) == 0:
             filepath = bpy.data.filepath
             self.export_path = os.path.dirname(filepath)
         else:
             self.export_path = bpy.path.abspath(self.export_path)
-        self.export_path += f'\\{bpy.path.basename(bpy.context.blend_data.filepath)[:-6]}'
-
-        is_exist = os.path.exists(self.export_path)
+        subfolder = bpy.path.abspath("//").split('\\')[-2]
+        is_exist = os.path.exists(self.export_path + "/" + subfolder)
         if not is_exist:
-            os.makedirs(self.export_path)
+            os.makedirs(self.export_path + "/" + subfolder)
 
         for scene in bpy.data.scenes:
-            context.window.scene = scene
-            view_layer = context.view_layer
-            bpy.ops.object.select_all(action='DESELECT')
+            for collection in scene.collection.children_recursive:
+                if collection.asset_data is None:
+                    continue
 
-            for collection in scene.collection.children:
-                if collection.asset_data is not None:
-                    # show collection in viewport
-                    layer_collection = view_layer.layer_collection.children[collection.name]
+                objects = []
+                for sub_collection in collection.children_recursive:
+                    objects.extend(sub_collection.objects)
+                objects.extend(collection.objects)
 
-                    initial_visibility = layer_collection.hide_viewport
-                    initial_exclusion = layer_collection.exclude
-                    layer_collection.hide_viewport = False
-                    layer_collection.exclude = False
-                    collection.hide_viewport = False
+                for obj in objects:
+                    if obj.type not in ['MESH', 'CURVE']:
+                        continue
+                    if obj.data.library is not None:
+                        continue
+                    if 'Morph' in obj.name or 'MC_' in obj.name:
+                        continue
 
-                    for obj in collection.objects:
-                        if obj.data.name in self.exported_meshes:
-                            continue
-                        else:
-                            self.exported_meshes.append(obj.data.name)
-                        obj.hide_set(False)
-                        obj.select_set(True)
+                    if obj.type == 'CURVE':
+                        export_name = obj.name
+                        obj.name = "ignore"
+                        export_mesh = bpy.data.meshes.new_from_object(obj.evaluated_get(self.depsgraph))
+                        export_obj = bpy.data.objects.new(export_name, export_mesh)
+                        export_obj.data.name = export_name
+                    else:
+                        export_obj = obj
+                        export_mesh = obj.data
 
-                        triangulate = obj.modifiers.new('EXP_TRI', 'TRIANGULATE')
-                        triangulate.min_vertices = 5
-                        triangulate.keep_custom_normals = True
+                    if hash_geometry(export_mesh) in self.exported_hashes:
+                        continue
 
-                        if self.copy_method != 'NONE':
-                            for slot in obj.material_slots:
-                                self.export_material(slot.material)
+                    self.exported_hashes.append(hash_geometry(export_mesh))
 
-                    bpy.ops.export_scene.fbx(check_existing=False,
-                                             filepath=self.export_path + "/" + collection.name + ".fbx",
-                                             filter_glob="*.fbx",
-                                             use_selection=True,
-                                             object_types={'MESH'},
-                                             bake_space_transform=True,
-                                             mesh_smooth_type='OFF',
-                                             add_leaf_bones=False,
-                                             path_mode='ABSOLUTE',
-                                             axis_forward='X',
-                                             axis_up='Z',
-                                             apply_unit_scale=True,
-                                             apply_scale_options='FBX_SCALE_NONE',
-                                             global_scale=1.0,
-                                             use_triangles=False
-                                             )
+                    self.export_scene.collection.objects.link(export_obj)
 
-                    for obj in collection.objects:
-                        obj.select_set(False)
-                        if obj.modifiers.get('EXP_TRI'):
-                            obj.modifiers.remove(obj.modifiers['EXP_TRI'])
+                    triangulate = export_obj.modifiers.new('EXP_TRI', 'TRIANGULATE')
+                    triangulate.min_vertices = 5
+                    triangulate.keep_custom_normals = True
 
-                    layer_collection.hide_viewport = initial_visibility
-                    layer_collection.exclude = initial_exclusion
+        switch_scene(self.export_scene)
+        bpy.ops.object.select_all(action='DESELECT')
+        for obj in context.visible_objects:
+            obj.select_set(True)
+            if len(obj.data.uv_layers) > 1 and obj.data.uv_layers[1].name != lightmap_uv_layer:
+                insert_uv(obj.data, 1)
+            bpy.context.view_layer.objects.active = obj
 
-        context.window.scene = start_scene
+            obj.parent = None
+            obj.location = Vector((0.0, 0.0, 0.0))
+            obj.rotation_euler = Euler((0.0, 0.0, 0.0), 'XYZ')
+            obj.scale = Vector((1.0, 1.0, 1.0))
+
+            filepath = self.export_path + "/" + subfolder + "/" + obj.data.name + ".fbx"
+            bpy.ops.export_scene.fbx(check_existing=False,
+                                     filepath=filepath,
+                                     filter_glob="*.fbx",
+                                     use_selection=True,
+                                     object_types={'MESH'},
+                                     bake_space_transform=True,
+                                     mesh_smooth_type='FACE',
+                                     add_leaf_bones=False,
+                                     path_mode='ABSOLUTE',
+                                     axis_forward='X',
+                                     axis_up='Z',
+                                     apply_unit_scale=True,
+                                     apply_scale_options='FBX_SCALE_NONE',
+                                     global_scale=1.0,
+                                     use_triangles=False
+                                     )
+
+            obj.select_set(False)
+            if obj.modifiers.get('EXP_TRI'):
+                obj.modifiers.remove(obj.modifiers['EXP_TRI'])
+
         return {'FINISHED'}
 
 
