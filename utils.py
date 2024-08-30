@@ -284,3 +284,33 @@ def select_smooth_faces(obj, slope_epsilon=1):
                     mesh.polygons[poly.index].select = True
                     break
     return
+
+
+def insert_uv(mesh, index) -> None:
+    if len(mesh.uv_layers) + 1 <= index:
+        return
+
+    mesh.uv_layers.new()
+    uv_container = np.zeros(len(mesh.uv_layers[0].uv) * 2, dtype=float)
+    for i in range(len(mesh.uv_layers)-1, index, -1):
+        if i == 0:
+            break
+
+        mesh.uv_layers[i - 1].uv.foreach_get("vector", uv_container)
+        mesh.uv_layers[i].uv.foreach_set("vector", uv_container)
+
+        t_name = mesh.uv_layers[i - 1].name
+        mesh.uv_layers[i - 1].name = "temp"
+        mesh.uv_layers[i].name = t_name
+
+    del uv_container
+    return
+
+
+def switch_scene(scene) -> None:
+    context = bpy.context
+    context.window.scene = scene
+    bpy.ops.object.select_all(action='SELECT')
+    if len(context.selected_objects) > 0:
+        context.view_layer.objects.active = context.selected_objects[0]
+    return

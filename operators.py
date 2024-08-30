@@ -10,7 +10,7 @@ from shutil import copyfile, copy
 from mathutils import Vector, Euler, Matrix
 from math import pi, sqrt, ceil
 
-from .utils import hash_geometry, get_world_transform, copy_transform, select_smooth_faces
+from .utils import hash_geometry, get_world_transform, copy_transform, select_smooth_faces, insert_uv, switch_scene
 
 import numpy as np
 import bmesh
@@ -515,7 +515,7 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
         # PASS 2: pack all geometry, set texel density
         # switch scene to export and context to uv-view/3d-view by the name 'UV Editing'
         print(f"Pass 2 start")
-        self.switch_scene(self.export_scene)
+        switch_scene(self.export_scene)
 
         if context.workspace.name != 'UV Editing':
             self.report({'ERROR'}, "Please open default UV Editing workspace with exact name 'UV Editing'")
@@ -713,7 +713,7 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
         # PASS 3: export objects to UE/Houdini folders and write JSON
         print(f"Pass 3 start")
         print("Export assets to UE fbx")
-        self.switch_scene(self.unique_scene)
+        switch_scene(self.unique_scene)
         for obj in context.visible_objects:
             if obj.name[-2:] == '_0':
                 # export as unique
@@ -722,7 +722,7 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
         # I can't get "fresh" mesh data blocks from here for some reason if I don't switch back and forth
         # between edit and object modes after making all objects single-user
         # So first I write JSON and make mesh data single user, then switch context mode and then offset UVs
-        self.switch_scene(self.export_scene)
+        switch_scene(self.export_scene)
         bpy.ops.object.select_all(action='SELECT')
         bpy.ops.object.make_single_user(type='SELECTED_OBJECTS', object=False, obdata=True, material=False,
                                         animation=False, obdata_animation=True)
