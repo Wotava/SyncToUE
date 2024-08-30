@@ -25,6 +25,9 @@ panel_preset_attribute = 'panel_preset_index'
 inset_uv_layer = target_uv_names[3]
 slope_uv_layer = target_uv_names[4]
 
+lightmap_uv_layer_index = 1
+lightmap_uv_layer = target_uv_names[lightmap_uv_layer_index]
+
 bake_atlas_layer_index = 2
 bake_atlas_layer = target_uv_names[bake_atlas_layer_index]
 
@@ -716,6 +719,9 @@ class SCENE_OP_DumpToJSON(bpy.types.Operator):
         switch_scene(self.unique_scene)
         for obj in context.visible_objects:
             if obj.name[-2:] == '_0':
+                if (len(obj.data.uv_layers) > 1 and
+                        obj.data.uv_layers[lightmap_uv_layer_index].name != lightmap_uv_layer):
+                    insert_uv(obj.data, lightmap_uv_layer_index)
                 # export as unique
                 self.export_fbx(obj, target='UE')
 
